@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         123FastLink
 // @namespace    http://tampermonkey.net/
-// @version      2026.9.2.1
+// @version      2026.10.1.1
 // @description  123云盘秒传链接脚本
 // @author       Baoqing
 // @author       Chaofan
@@ -148,8 +148,8 @@ class PanApiClient {
                 method, headers, body, credentials: 'include'
             });
             const data = await response.json();
-            if (data.code !== 0) {
-                throw new Error(data.message);
+            if (!response.ok || data.code !== 0) {
+                throw new Error(`HTTP ${response.status}，API code ${data.code}：${data.message || response.statusText || '未知错误'}`);
             }
             return data;
         } catch (e) {
@@ -226,13 +226,14 @@ class PanApiClient {
             }
             if (!reuse) {
                 log.error('保存文件失败:', fileInfo.fileName, 'response:', response);
-                return [false, "未能实现秒传", null];
+                const status = response.data.UploadFileStatus;
+                return [false, `未能实现秒传：服务器返回 Reuse=false（code=${response.code}，message=${response.message}${status == null ? '' : `，UploadFileStatus=${status}`}）`, null];
             } else {
                 return [true, null, response['data']['Info']['FileId']];
             }
         } catch (error) {
             log.error('上传请求失败:', error);
-            return [false, '请求失败', null];
+            return [false, '请求失败：' + error.message, null];
         }
     }
 
@@ -1216,7 +1217,1848 @@ class TableRowSelector {
     }
 }
 
+;// ./node_modules/.pnpm/@streamparser+json@0.0.26/node_modules/@streamparser/json/dist/mjs/utils/bufferedString.js
+/**
+ * The accumulators that the tokenizer gathers strings and numbers into while
+ * their bytes arrive.
+ *
+ * @module
+ */
+/**
+ * A {@linkcode StringBuilder} that accumulates the token as a JavaScript
+ * string. This is the default: it's the fastest option for the small strings
+ * and numbers that dominate real JSON.
+ */
+class NonBufferedString {
+    constructor() {
+        // fatal: true makes invalid byte sequences (e.g. a lead byte followed by a
+        // non-continuation byte) throw instead of silently decoding to U+FFFD.
+        this.decoder = new TextDecoder("utf-8", { fatal: true });
+        // Pieces appended since the last toString(), not yet folded into `string`.
+        this.pending = [];
+        this.string = "";
+        this.byteLength = 0;
+    }
+    appendChar(char) {
+        this.pending.push(String.fromCharCode(char));
+        this.byteLength += 1;
+    }
+    appendBuf(buf, start = 0, end = buf.length) {
+        this.pending.push(this.decoder.decode(buf.subarray(start, end)));
+        this.byteLength += end - start;
+    }
+    appendCharCode(code) {
+        this.pending.push(String.fromCharCode(code));
+    }
+    reset() {
+        this.pending = [];
+        this.string = "";
+        this.byteLength = 0;
+    }
+    // Folds only the pieces appended since the last call into `string`, so
+    // repeated calls (one per chunk when emitting partial tokens) stay linear
+    // overall instead of re-joining the whole accumulated string every time.
+    toString() {
+        if (this.pending.length > 0) {
+            this.string += this.pending.join("");
+            this.pending = [];
+        }
+        return this.string;
+    }
+}
+/**
+ * A {@linkcode StringBuilder} that accumulates the token's bytes into a
+ * fixed-size `Uint8Array` and only decodes them once the buffer is full.
+ *
+ * Enabled through the tokenizer's `stringBufferSize`/`numberBufferSize`
+ * options. It avoids V8's over-allocation on repeated string concatenation,
+ * which is what makes very large strings and numbers exhaust memory, at the
+ * cost of an encoding/decoding round trip that isn't worth it for small values.
+ */
+class BufferedString {
+    /**
+     * @param bufferSize The size, in bytes, of the buffer to accumulate into.
+     */
+    constructor(bufferSize) {
+        // fatal: true makes invalid byte sequences (e.g. a lead byte followed by a
+        // non-continuation byte) throw instead of silently decoding to U+FFFD.
+        this.decoder = new TextDecoder("utf-8", { fatal: true });
+        this.bufferOffset = 0;
+        this.string = "";
+        this.byteLength = 0;
+        this.buffer = new Uint8Array(bufferSize);
+    }
+    appendChar(char) {
+        if (this.bufferOffset >= this.buffer.length)
+            this.flushStringBuffer();
+        this.buffer[this.bufferOffset++] = char;
+        this.byteLength += 1;
+    }
+    appendBuf(buf, start = 0, end = buf.length) {
+        const size = end - start;
+        if (this.bufferOffset + size > this.buffer.length)
+            this.flushStringBuffer();
+        if (size > this.buffer.length) {
+            // Span larger than the working buffer: decode it straight into the
+            // string instead of copying it in (buffer.set would overflow). Safe
+            // because callers only append complete-character spans -- the tokenizer
+            // never splits a multi-byte char across appendBuf calls -- so decoding
+            // this span on its own can't cut through the middle of a character.
+            this.string += this.decoder.decode(buf.subarray(start, end));
+            this.byteLength += size;
+            return;
+        }
+        this.buffer.set(buf.subarray(start, end), this.bufferOffset);
+        this.bufferOffset += size;
+        this.byteLength += size;
+    }
+    appendCharCode(code) {
+        this.flushStringBuffer();
+        this.string += String.fromCharCode(code);
+    }
+    flushStringBuffer() {
+        this.string += this.decoder.decode(this.buffer.subarray(0, this.bufferOffset));
+        this.bufferOffset = 0;
+    }
+    reset() {
+        this.string = "";
+        this.bufferOffset = 0;
+        this.byteLength = 0;
+    }
+    toString() {
+        this.flushStringBuffer();
+        return this.string;
+    }
+}
+//# sourceMappingURL=bufferedString.js.map
+;// ./node_modules/.pnpm/@streamparser+json@0.0.26/node_modules/@streamparser/json/dist/mjs/utils/types/tokenType.js
+/**
+ * The JSON token types emitted by the tokenizer.
+ *
+ * @module
+ */
+/** The type of a JSON token, as reported by the tokenizer's `onToken` callback. */
+var TokenType;
+(function (TokenType) {
+    /** `{` */
+    TokenType[TokenType["LEFT_BRACE"] = 0] = "LEFT_BRACE";
+    /** `}` */
+    TokenType[TokenType["RIGHT_BRACE"] = 1] = "RIGHT_BRACE";
+    /** `[` */
+    TokenType[TokenType["LEFT_BRACKET"] = 2] = "LEFT_BRACKET";
+    /** `]` */
+    TokenType[TokenType["RIGHT_BRACKET"] = 3] = "RIGHT_BRACKET";
+    /** `:` */
+    TokenType[TokenType["COLON"] = 4] = "COLON";
+    /** `,` */
+    TokenType[TokenType["COMMA"] = 5] = "COMMA";
+    /** `true` */
+    TokenType[TokenType["TRUE"] = 6] = "TRUE";
+    /** `false` */
+    TokenType[TokenType["FALSE"] = 7] = "FALSE";
+    /** `null` */
+    TokenType[TokenType["NULL"] = 8] = "NULL";
+    /** A string, with all its escape sequences already resolved. */
+    TokenType[TokenType["STRING"] = 9] = "STRING";
+    /** A number, already parsed into a JavaScript number. */
+    TokenType[TokenType["NUMBER"] = 10] = "NUMBER";
+    /** The configured separator between consecutive JSON documents. */
+    TokenType[TokenType["SEPARATOR"] = 11] = "SEPARATOR";
+})(TokenType || (TokenType = {}));
+/* harmony default export */ const tokenType = (TokenType);
+//# sourceMappingURL=tokenType.js.map
+;// ./node_modules/.pnpm/@streamparser+json@0.0.26/node_modules/@streamparser/json/dist/mjs/utils/utf-8.js
+/**
+ * The utf-8 byte values that the tokenizer matches the incoming stream against.
+ *
+ * @module
+ */
+/** The utf-8 byte value of each character that is meaningful to the tokenizer. */
+var charset;
+(function (charset) {
+    charset[charset["BACKSPACE"] = 8] = "BACKSPACE";
+    charset[charset["FORM_FEED"] = 12] = "FORM_FEED";
+    charset[charset["NEWLINE"] = 10] = "NEWLINE";
+    charset[charset["CARRIAGE_RETURN"] = 13] = "CARRIAGE_RETURN";
+    charset[charset["TAB"] = 9] = "TAB";
+    charset[charset["SPACE"] = 32] = "SPACE";
+    charset[charset["EXCLAMATION_MARK"] = 33] = "EXCLAMATION_MARK";
+    charset[charset["QUOTATION_MARK"] = 34] = "QUOTATION_MARK";
+    charset[charset["NUMBER_SIGN"] = 35] = "NUMBER_SIGN";
+    charset[charset["DOLLAR_SIGN"] = 36] = "DOLLAR_SIGN";
+    charset[charset["PERCENT_SIGN"] = 37] = "PERCENT_SIGN";
+    charset[charset["AMPERSAND"] = 38] = "AMPERSAND";
+    charset[charset["APOSTROPHE"] = 39] = "APOSTROPHE";
+    charset[charset["LEFT_PARENTHESIS"] = 40] = "LEFT_PARENTHESIS";
+    charset[charset["RIGHT_PARENTHESIS"] = 41] = "RIGHT_PARENTHESIS";
+    charset[charset["ASTERISK"] = 42] = "ASTERISK";
+    charset[charset["PLUS_SIGN"] = 43] = "PLUS_SIGN";
+    charset[charset["COMMA"] = 44] = "COMMA";
+    charset[charset["HYPHEN_MINUS"] = 45] = "HYPHEN_MINUS";
+    charset[charset["FULL_STOP"] = 46] = "FULL_STOP";
+    charset[charset["SOLIDUS"] = 47] = "SOLIDUS";
+    charset[charset["DIGIT_ZERO"] = 48] = "DIGIT_ZERO";
+    charset[charset["DIGIT_ONE"] = 49] = "DIGIT_ONE";
+    charset[charset["DIGIT_TWO"] = 50] = "DIGIT_TWO";
+    charset[charset["DIGIT_THREE"] = 51] = "DIGIT_THREE";
+    charset[charset["DIGIT_FOUR"] = 52] = "DIGIT_FOUR";
+    charset[charset["DIGIT_FIVE"] = 53] = "DIGIT_FIVE";
+    charset[charset["DIGIT_SIX"] = 54] = "DIGIT_SIX";
+    charset[charset["DIGIT_SEVEN"] = 55] = "DIGIT_SEVEN";
+    charset[charset["DIGIT_EIGHT"] = 56] = "DIGIT_EIGHT";
+    charset[charset["DIGIT_NINE"] = 57] = "DIGIT_NINE";
+    charset[charset["COLON"] = 58] = "COLON";
+    charset[charset["SEMICOLON"] = 59] = "SEMICOLON";
+    charset[charset["LESS_THAN_SIGN"] = 60] = "LESS_THAN_SIGN";
+    charset[charset["EQUALS_SIGN"] = 61] = "EQUALS_SIGN";
+    charset[charset["GREATER_THAN_SIGN"] = 62] = "GREATER_THAN_SIGN";
+    charset[charset["QUESTION_MARK"] = 63] = "QUESTION_MARK";
+    charset[charset["COMMERCIAL_AT"] = 64] = "COMMERCIAL_AT";
+    charset[charset["LATIN_CAPITAL_LETTER_A"] = 65] = "LATIN_CAPITAL_LETTER_A";
+    charset[charset["LATIN_CAPITAL_LETTER_B"] = 66] = "LATIN_CAPITAL_LETTER_B";
+    charset[charset["LATIN_CAPITAL_LETTER_C"] = 67] = "LATIN_CAPITAL_LETTER_C";
+    charset[charset["LATIN_CAPITAL_LETTER_D"] = 68] = "LATIN_CAPITAL_LETTER_D";
+    charset[charset["LATIN_CAPITAL_LETTER_E"] = 69] = "LATIN_CAPITAL_LETTER_E";
+    charset[charset["LATIN_CAPITAL_LETTER_F"] = 70] = "LATIN_CAPITAL_LETTER_F";
+    charset[charset["LATIN_CAPITAL_LETTER_G"] = 71] = "LATIN_CAPITAL_LETTER_G";
+    charset[charset["LATIN_CAPITAL_LETTER_H"] = 72] = "LATIN_CAPITAL_LETTER_H";
+    charset[charset["LATIN_CAPITAL_LETTER_I"] = 73] = "LATIN_CAPITAL_LETTER_I";
+    charset[charset["LATIN_CAPITAL_LETTER_J"] = 74] = "LATIN_CAPITAL_LETTER_J";
+    charset[charset["LATIN_CAPITAL_LETTER_K"] = 75] = "LATIN_CAPITAL_LETTER_K";
+    charset[charset["LATIN_CAPITAL_LETTER_L"] = 76] = "LATIN_CAPITAL_LETTER_L";
+    charset[charset["LATIN_CAPITAL_LETTER_M"] = 77] = "LATIN_CAPITAL_LETTER_M";
+    charset[charset["LATIN_CAPITAL_LETTER_N"] = 78] = "LATIN_CAPITAL_LETTER_N";
+    charset[charset["LATIN_CAPITAL_LETTER_O"] = 79] = "LATIN_CAPITAL_LETTER_O";
+    charset[charset["LATIN_CAPITAL_LETTER_P"] = 80] = "LATIN_CAPITAL_LETTER_P";
+    charset[charset["LATIN_CAPITAL_LETTER_Q"] = 81] = "LATIN_CAPITAL_LETTER_Q";
+    charset[charset["LATIN_CAPITAL_LETTER_R"] = 82] = "LATIN_CAPITAL_LETTER_R";
+    charset[charset["LATIN_CAPITAL_LETTER_S"] = 83] = "LATIN_CAPITAL_LETTER_S";
+    charset[charset["LATIN_CAPITAL_LETTER_T"] = 84] = "LATIN_CAPITAL_LETTER_T";
+    charset[charset["LATIN_CAPITAL_LETTER_U"] = 85] = "LATIN_CAPITAL_LETTER_U";
+    charset[charset["LATIN_CAPITAL_LETTER_V"] = 86] = "LATIN_CAPITAL_LETTER_V";
+    charset[charset["LATIN_CAPITAL_LETTER_W"] = 87] = "LATIN_CAPITAL_LETTER_W";
+    charset[charset["LATIN_CAPITAL_LETTER_X"] = 88] = "LATIN_CAPITAL_LETTER_X";
+    charset[charset["LATIN_CAPITAL_LETTER_Y"] = 89] = "LATIN_CAPITAL_LETTER_Y";
+    charset[charset["LATIN_CAPITAL_LETTER_Z"] = 90] = "LATIN_CAPITAL_LETTER_Z";
+    charset[charset["LEFT_SQUARE_BRACKET"] = 91] = "LEFT_SQUARE_BRACKET";
+    charset[charset["REVERSE_SOLIDUS"] = 92] = "REVERSE_SOLIDUS";
+    charset[charset["RIGHT_SQUARE_BRACKET"] = 93] = "RIGHT_SQUARE_BRACKET";
+    charset[charset["CIRCUMFLEX_ACCENT"] = 94] = "CIRCUMFLEX_ACCENT";
+    charset[charset["LOW_LINE"] = 95] = "LOW_LINE";
+    charset[charset["GRAVE_ACCENT"] = 96] = "GRAVE_ACCENT";
+    charset[charset["LATIN_SMALL_LETTER_A"] = 97] = "LATIN_SMALL_LETTER_A";
+    charset[charset["LATIN_SMALL_LETTER_B"] = 98] = "LATIN_SMALL_LETTER_B";
+    charset[charset["LATIN_SMALL_LETTER_C"] = 99] = "LATIN_SMALL_LETTER_C";
+    charset[charset["LATIN_SMALL_LETTER_D"] = 100] = "LATIN_SMALL_LETTER_D";
+    charset[charset["LATIN_SMALL_LETTER_E"] = 101] = "LATIN_SMALL_LETTER_E";
+    charset[charset["LATIN_SMALL_LETTER_F"] = 102] = "LATIN_SMALL_LETTER_F";
+    charset[charset["LATIN_SMALL_LETTER_G"] = 103] = "LATIN_SMALL_LETTER_G";
+    charset[charset["LATIN_SMALL_LETTER_H"] = 104] = "LATIN_SMALL_LETTER_H";
+    charset[charset["LATIN_SMALL_LETTER_I"] = 105] = "LATIN_SMALL_LETTER_I";
+    charset[charset["LATIN_SMALL_LETTER_J"] = 106] = "LATIN_SMALL_LETTER_J";
+    charset[charset["LATIN_SMALL_LETTER_K"] = 107] = "LATIN_SMALL_LETTER_K";
+    charset[charset["LATIN_SMALL_LETTER_L"] = 108] = "LATIN_SMALL_LETTER_L";
+    charset[charset["LATIN_SMALL_LETTER_M"] = 109] = "LATIN_SMALL_LETTER_M";
+    charset[charset["LATIN_SMALL_LETTER_N"] = 110] = "LATIN_SMALL_LETTER_N";
+    charset[charset["LATIN_SMALL_LETTER_O"] = 111] = "LATIN_SMALL_LETTER_O";
+    charset[charset["LATIN_SMALL_LETTER_P"] = 112] = "LATIN_SMALL_LETTER_P";
+    charset[charset["LATIN_SMALL_LETTER_Q"] = 113] = "LATIN_SMALL_LETTER_Q";
+    charset[charset["LATIN_SMALL_LETTER_R"] = 114] = "LATIN_SMALL_LETTER_R";
+    charset[charset["LATIN_SMALL_LETTER_S"] = 115] = "LATIN_SMALL_LETTER_S";
+    charset[charset["LATIN_SMALL_LETTER_T"] = 116] = "LATIN_SMALL_LETTER_T";
+    charset[charset["LATIN_SMALL_LETTER_U"] = 117] = "LATIN_SMALL_LETTER_U";
+    charset[charset["LATIN_SMALL_LETTER_V"] = 118] = "LATIN_SMALL_LETTER_V";
+    charset[charset["LATIN_SMALL_LETTER_W"] = 119] = "LATIN_SMALL_LETTER_W";
+    charset[charset["LATIN_SMALL_LETTER_X"] = 120] = "LATIN_SMALL_LETTER_X";
+    charset[charset["LATIN_SMALL_LETTER_Y"] = 121] = "LATIN_SMALL_LETTER_Y";
+    charset[charset["LATIN_SMALL_LETTER_Z"] = 122] = "LATIN_SMALL_LETTER_Z";
+    charset[charset["LEFT_CURLY_BRACKET"] = 123] = "LEFT_CURLY_BRACKET";
+    charset[charset["VERTICAL_LINE"] = 124] = "VERTICAL_LINE";
+    charset[charset["RIGHT_CURLY_BRACKET"] = 125] = "RIGHT_CURLY_BRACKET";
+    charset[charset["TILDE"] = 126] = "TILDE";
+})(charset || (charset = {}));
+/**
+ * The character that each JSON escape sequence stands for, keyed by the byte
+ * that follows the backslash. Unicode escapes (`\uXXXX`) are not in here; the
+ * tokenizer resolves those itself.
+ */
+const escapedSequences = {
+    [34 /* charset.QUOTATION_MARK */]: 34 /* charset.QUOTATION_MARK */,
+    [92 /* charset.REVERSE_SOLIDUS */]: 92 /* charset.REVERSE_SOLIDUS */,
+    [47 /* charset.SOLIDUS */]: 47 /* charset.SOLIDUS */,
+    [98 /* charset.LATIN_SMALL_LETTER_B */]: 8 /* charset.BACKSPACE */,
+    [102 /* charset.LATIN_SMALL_LETTER_F */]: 12 /* charset.FORM_FEED */,
+    [110 /* charset.LATIN_SMALL_LETTER_N */]: 10 /* charset.NEWLINE */,
+    [114 /* charset.LATIN_SMALL_LETTER_R */]: 13 /* charset.CARRIAGE_RETURN */,
+    [116 /* charset.LATIN_SMALL_LETTER_T */]: 9 /* charset.TAB */,
+};
+//# sourceMappingURL=utf-8.js.map
+;// ./node_modules/.pnpm/@streamparser+json@0.0.26/node_modules/@streamparser/json/dist/mjs/tokenizer.js
+/**
+ * A JSON-compliant tokenizer that turns a utf-8 stream into JSON tokens.
+ *
+ * @example
+ * ```ts
+ * import Tokenizer from "@streamparser/json/tokenizer.js";
+ *
+ * const tokenizer = new Tokenizer();
+ * tokenizer.onToken = ({ token, value, offset }) => {
+ *   // process the token
+ * };
+ *
+ * tokenizer.write('{ "test": ["a"] }');
+ * ```
+ *
+ * @module
+ */
+
+
+
+// Tokenizer States
+var TokenizerStates;
+(function (TokenizerStates) {
+    TokenizerStates[TokenizerStates["START"] = 0] = "START";
+    TokenizerStates[TokenizerStates["ENDED"] = 1] = "ENDED";
+    TokenizerStates[TokenizerStates["ERROR"] = 2] = "ERROR";
+    TokenizerStates[TokenizerStates["TRUE1"] = 3] = "TRUE1";
+    TokenizerStates[TokenizerStates["TRUE2"] = 4] = "TRUE2";
+    TokenizerStates[TokenizerStates["TRUE3"] = 5] = "TRUE3";
+    TokenizerStates[TokenizerStates["FALSE1"] = 6] = "FALSE1";
+    TokenizerStates[TokenizerStates["FALSE2"] = 7] = "FALSE2";
+    TokenizerStates[TokenizerStates["FALSE3"] = 8] = "FALSE3";
+    TokenizerStates[TokenizerStates["FALSE4"] = 9] = "FALSE4";
+    TokenizerStates[TokenizerStates["NULL1"] = 10] = "NULL1";
+    TokenizerStates[TokenizerStates["NULL2"] = 11] = "NULL2";
+    TokenizerStates[TokenizerStates["NULL3"] = 12] = "NULL3";
+    TokenizerStates[TokenizerStates["STRING_DEFAULT"] = 13] = "STRING_DEFAULT";
+    TokenizerStates[TokenizerStates["STRING_AFTER_BACKSLASH"] = 14] = "STRING_AFTER_BACKSLASH";
+    TokenizerStates[TokenizerStates["STRING_UNICODE_DIGIT_1"] = 15] = "STRING_UNICODE_DIGIT_1";
+    TokenizerStates[TokenizerStates["STRING_UNICODE_DIGIT_2"] = 16] = "STRING_UNICODE_DIGIT_2";
+    TokenizerStates[TokenizerStates["STRING_UNICODE_DIGIT_3"] = 17] = "STRING_UNICODE_DIGIT_3";
+    TokenizerStates[TokenizerStates["STRING_UNICODE_DIGIT_4"] = 18] = "STRING_UNICODE_DIGIT_4";
+    TokenizerStates[TokenizerStates["STRING_INCOMPLETE_CHAR"] = 19] = "STRING_INCOMPLETE_CHAR";
+    TokenizerStates[TokenizerStates["NUMBER_AFTER_INITIAL_MINUS"] = 20] = "NUMBER_AFTER_INITIAL_MINUS";
+    TokenizerStates[TokenizerStates["NUMBER_AFTER_INITIAL_ZERO"] = 21] = "NUMBER_AFTER_INITIAL_ZERO";
+    TokenizerStates[TokenizerStates["NUMBER_AFTER_INITIAL_NON_ZERO"] = 22] = "NUMBER_AFTER_INITIAL_NON_ZERO";
+    TokenizerStates[TokenizerStates["NUMBER_AFTER_FULL_STOP"] = 23] = "NUMBER_AFTER_FULL_STOP";
+    TokenizerStates[TokenizerStates["NUMBER_AFTER_DECIMAL"] = 24] = "NUMBER_AFTER_DECIMAL";
+    TokenizerStates[TokenizerStates["NUMBER_AFTER_E"] = 25] = "NUMBER_AFTER_E";
+    TokenizerStates[TokenizerStates["NUMBER_AFTER_E_AND_SIGN"] = 26] = "NUMBER_AFTER_E_AND_SIGN";
+    TokenizerStates[TokenizerStates["NUMBER_AFTER_E_AND_DIGIT"] = 27] = "NUMBER_AFTER_E_AND_DIGIT";
+    TokenizerStates[TokenizerStates["SEPARATOR"] = 28] = "SEPARATOR";
+    TokenizerStates[TokenizerStates["BOM_OR_START"] = 29] = "BOM_OR_START";
+    TokenizerStates[TokenizerStates["BOM"] = 30] = "BOM";
+})(TokenizerStates || (TokenizerStates = {}));
+function TokenizerStateToString(tokenizerState) {
+    return [
+        "START",
+        "ENDED",
+        "ERROR",
+        "TRUE1",
+        "TRUE2",
+        "TRUE3",
+        "FALSE1",
+        "FALSE2",
+        "FALSE3",
+        "FALSE4",
+        "NULL1",
+        "NULL2",
+        "NULL3",
+        "STRING_DEFAULT",
+        "STRING_AFTER_BACKSLASH",
+        "STRING_UNICODE_DIGIT_1",
+        "STRING_UNICODE_DIGIT_2",
+        "STRING_UNICODE_DIGIT_3",
+        "STRING_UNICODE_DIGIT_4",
+        "STRING_INCOMPLETE_CHAR",
+        "NUMBER_AFTER_INITIAL_MINUS",
+        "NUMBER_AFTER_INITIAL_ZERO",
+        "NUMBER_AFTER_INITIAL_NON_ZERO",
+        "NUMBER_AFTER_FULL_STOP",
+        "NUMBER_AFTER_DECIMAL",
+        "NUMBER_AFTER_E",
+        "NUMBER_AFTER_E_AND_SIGN",
+        "NUMBER_AFTER_E_AND_DIGIT",
+        "SEPARATOR",
+        "BOM_OR_START",
+        "BOM",
+    ][tokenizerState];
+}
+const defaultOpts = {
+    stringBufferSize: 0,
+    numberBufferSize: 0,
+    separator: undefined,
+    emitPartialTokens: false,
+};
+/** The error thrown when the tokenizer is misconfigured or hits invalid JSON. */
+class TokenizerError extends Error {
+    /**
+     * @param message What went wrong.
+     */
+    constructor(message) {
+        super(message);
+        // Typescript is broken. This is a workaround
+        Object.setPrototypeOf(this, TokenizerError.prototype);
+    }
+}
+// A non-integer buffer size (e.g. 0.5) silently truncates when passed to
+// `new Uint8Array(size)` (0.5 becomes a *zero-length* buffer) instead of
+// throwing, so every appended byte gets silently dropped rather than
+// buffered -- corrupting the parsed value instead of failing loudly.
+function validateBufferSize(name, size) {
+    if (size === undefined)
+        return;
+    if (!Number.isInteger(size) || size < 0) {
+        throw new TokenizerError(`Invalid "${name}": ${size}. Expected a non-negative integer.`);
+    }
+}
+// Byte length of the UTF-8 character starting with `leadByte`. Invalid or
+// continuation lead bytes fall through to 3/4 here and are rejected later by
+// the fatal TextDecoder when the bytes are actually decoded.
+function utf8SequenceLength(leadByte) {
+    if (leadByte >= 194 && leadByte <= 223)
+        return 2;
+    if (leadByte <= 239)
+        return 3;
+    return 4;
+}
+// Index just past the last COMPLETE multi-byte character of the run starting at
+// `start`. Stops at the first ASCII byte, or at a character whose bytes would
+// run past the end of the buffer (a boundary split the caller carries over).
+function multiByteRunEnd(buffer, start) {
+    let j = start;
+    while (j < buffer.length && buffer[j] >= 128) {
+        const seqLength = utf8SequenceLength(buffer[j]);
+        if (j + seqLength > buffer.length)
+            break; // split across the chunk boundary
+        j += seqLength;
+    }
+    return j;
+}
+/**
+ * A JSON-compliant tokenizer that turns a utf-8 stream into JSON tokens.
+ *
+ * Data is pushed in with {@linkcode Tokenizer.write} and the resulting tokens
+ * come back through the {@linkcode Tokenizer.onToken} callback, which the user
+ * is expected to override. Feed the tokens to a `TokenParser` to get JSON
+ * values back, or use a `JSONParser`, which chains both.
+ *
+ * @example
+ * ```ts
+ * import Tokenizer from "@streamparser/json/tokenizer.js";
+ *
+ * const tokenizer = new Tokenizer({ separator: "\n" });
+ * tokenizer.onToken = ({ token, value, offset }) => {
+ *   // process the token
+ * };
+ * tokenizer.onError = (err) => console.error(err);
+ *
+ * tokenizer.write('{ "test": ["a"] }');
+ * tokenizer.end();
+ * ```
+ */
+class Tokenizer {
+    /**
+     * @param opts How to tokenize. See {@linkcode TokenizerOptions}.
+     */
+    constructor(opts) {
+        this.state = 29 /* TokenizerStates.BOM_OR_START */;
+        this.bomIndex = 0;
+        this.separatorIndex = 0;
+        this.escapedCharsByteLength = 0;
+        this.bytes_remaining = 0; // number of bytes remaining in multi byte utf8 char to read after split boundary
+        this.bytes_in_sequence = 0; // bytes in multi byte utf8 char to read
+        this.char_split_buffer = new Uint8Array(4); // for rebuilding chars split before boundary is reached
+        this.encoder = new TextEncoder();
+        this.offset = -1;
+        this.streamByteLength = 0; // Total bytes consumed across all write() calls before the current one
+        opts = Object.assign(Object.assign({}, defaultOpts), opts);
+        validateBufferSize("stringBufferSize", opts.stringBufferSize);
+        validateBufferSize("numberBufferSize", opts.numberBufferSize);
+        this.emitPartialTokens = opts.emitPartialTokens === true;
+        this.bufferedString =
+            opts.stringBufferSize && opts.stringBufferSize > 4
+                ? new BufferedString(opts.stringBufferSize)
+                : new NonBufferedString();
+        this.bufferedNumber =
+            opts.numberBufferSize && opts.numberBufferSize > 0
+                ? new BufferedString(opts.numberBufferSize)
+                : new NonBufferedString();
+        this.separator = opts.separator;
+        this.separatorBytes = opts.separator
+            ? this.encoder.encode(opts.separator)
+            : undefined;
+    }
+    /** Whether the tokenizer is ended, and thus no longer accepting data. */
+    get isEnded() {
+        return this.state === 1 /* TokenizerStates.ENDED */;
+    }
+    // Appends the code unit decoded from one \uXXXX escape, matching
+    // JSON.parse's handling of surrogates: a valid high/low surrogate pair
+    // combines into one character; an unpaired high or low surrogate is kept
+    // as a raw UTF-16 code unit rather than replaced or dropped (JS strings
+    // are free to contain lone surrogates; only encoding them as UTF-8 bytes
+    // is lossy, which is why appendCharCode -- not the encoder -- is used for
+    // them).
+    appendUnicodeCodeUnit(intVal) {
+        if (this.highSurrogate !== undefined) {
+            if (intVal >= 0xdc00 && intVal <= 0xdfff) {
+                // <56320,57343> - valid low surrogate: combine with the pending
+                // high surrogate into a single character.
+                const unicodeString = String.fromCharCode(this.highSurrogate, intVal);
+                const unicodeBuffer = this.encoder.encode(unicodeString);
+                this.bufferedString.appendBuf(unicodeBuffer);
+                // len(\u0000)=6 minus the fact you're appending len(buf)
+                this.escapedCharsByteLength += 6 - unicodeBuffer.byteLength;
+                this.highSurrogate = undefined;
+                return;
+            }
+            // Not a matching low surrogate: the pending high surrogate stands on
+            // its own, and intVal is processed independently below.
+            this.flushPendingHighSurrogate();
+        }
+        if (intVal >= 0xd800 && intVal <= 0xdbff) {
+            // <55296,56319> - high surrogate: defer until we know whether a
+            // matching low surrogate follows.
+            this.highSurrogate = intVal;
+            this.escapedCharsByteLength += 6;
+            return;
+        }
+        if (intVal >= 0xdc00 && intVal <= 0xdfff) {
+            // <56320,57343> - lone low surrogate with no preceding high
+            // surrogate: keep as a raw code unit.
+            this.bufferedString.appendCharCode(intVal);
+            this.escapedCharsByteLength += 6;
+            return;
+        }
+        const unicodeString = String.fromCharCode(intVal);
+        const unicodeBuffer = this.encoder.encode(unicodeString);
+        this.bufferedString.appendBuf(unicodeBuffer);
+        // len(\u0000)=6 minus the fact you're appending len(buf)
+        this.escapedCharsByteLength += 6 - unicodeBuffer.byteLength;
+    }
+    flushPendingHighSurrogate() {
+        if (this.highSurrogate !== undefined) {
+            this.bufferedString.appendCharCode(this.highSurrogate);
+            this.highSurrogate = undefined;
+        }
+    }
+    // Stash the leading bytes of a multi-byte character split across the chunk
+    // boundary; STRING_INCOMPLETE_CHAR completes it from the next chunk.
+    startIncompleteChar(buffer, start) {
+        this.bytes_in_sequence = utf8SequenceLength(buffer[start]);
+        this.bytes_remaining = start + this.bytes_in_sequence - buffer.length;
+        this.char_split_buffer.set(buffer.subarray(start));
+        this.state = 19 /* TokenizerStates.STRING_INCOMPLETE_CHAR */;
+    }
+    /**
+     * Pushes the next chunk of the JSON stream into the tokenizer.
+     *
+     * Tokenizing happens synchronously, so every token in `input` is emitted
+     * through {@linkcode Tokenizer.onToken} before this returns. A chunk may end
+     * anywhere, including in the middle of a multi-byte character; the rest of it
+     * is picked up from the next chunk.
+     *
+     * @param input The chunk to tokenize: a string, a `TypedArray`, or any
+     * iterable of utf-8 byte values.
+     * @throws {TokenizerError} If the data is not valid JSON and no
+     * {@linkcode Tokenizer.onError} callback has been set.
+     */
+    write(input) {
+        try {
+            let buffer;
+            if (input instanceof Uint8Array) {
+                buffer = input;
+            }
+            else if (typeof input === "string") {
+                if (this.pendingStringSurrogate !== undefined) {
+                    input = this.pendingStringSurrogate + input;
+                    this.pendingStringSurrogate = undefined;
+                }
+                const lastCharCode = input.charCodeAt(input.length - 1);
+                if (lastCharCode >= 0xd800 && lastCharCode <= 0xdbff) {
+                    // Lone high surrogate at the very end of this chunk: hold it back
+                    // instead of encoding it (and corrupting it into U+FFFD) alone,
+                    // in case the next chunk supplies its matching low surrogate.
+                    this.pendingStringSurrogate = input[input.length - 1];
+                    input = input.slice(0, -1);
+                }
+                buffer = this.encoder.encode(input);
+            }
+            else if (ArrayBuffer.isView(input)) {
+                buffer = new Uint8Array(input.buffer, input.byteOffset, input.byteLength);
+            }
+            else if (input !== null &&
+                typeof input === "object" &&
+                typeof input[Symbol.iterator] === "function") {
+                // Any Iterable<number>, not just literal Arrays (e.g. Set, Map
+                // values(), a generator) -- matching the public write() signature,
+                // which already types `input` as Iterable<number> | string.
+                buffer = Uint8Array.from(input);
+            }
+            else {
+                throw new TypeError("Unexpected type. The `write` function only accepts Iterables (e.g. Arrays, Sets, Generators), TypedArrays and Strings.");
+            }
+            for (let i = 0; i < buffer.length; i += 1) {
+                const n = buffer[i]; // get current byte from buffer
+                switch (this.state) {
+                    // @ts-expect-error fall through case
+                    case 29 /* TokenizerStates.BOM_OR_START */:
+                        if (n === 0xef) {
+                            this.bom = [0xef, 0xbb, 0xbf];
+                            this.bomIndex += 1;
+                            this.state = 30 /* TokenizerStates.BOM */;
+                            continue;
+                        }
+                        if (input instanceof Uint16Array) {
+                            if (n === 0xfe) {
+                                this.bom = [0xfe, 0xff];
+                                this.bomIndex += 1;
+                                this.state = 30 /* TokenizerStates.BOM */;
+                                continue;
+                            }
+                            if (n === 0xff) {
+                                this.bom = [0xff, 0xfe];
+                                this.bomIndex += 1;
+                                this.state = 30 /* TokenizerStates.BOM */;
+                                continue;
+                            }
+                        }
+                        if (input instanceof Uint32Array) {
+                            if (n === 0x00) {
+                                this.bom = [0x00, 0x00, 0xfe, 0xff];
+                                this.bomIndex += 1;
+                                this.state = 30 /* TokenizerStates.BOM */;
+                                continue;
+                            }
+                            if (n === 0xff) {
+                                this.bom = [0xff, 0xfe, 0x00, 0x00];
+                                this.bomIndex += 1;
+                                this.state = 30 /* TokenizerStates.BOM */;
+                                continue;
+                            }
+                        }
+                    case 0 /* TokenizerStates.START */:
+                        this.offset += 1;
+                        if (this.separatorBytes && n === this.separatorBytes[0]) {
+                            if (this.separatorBytes.length === 1) {
+                                this.state = 0 /* TokenizerStates.START */;
+                                this.onToken({
+                                    token: tokenType.SEPARATOR,
+                                    value: this.separator,
+                                    offset: this.offset + this.separatorBytes.length - 1,
+                                });
+                                continue;
+                            }
+                            this.state = 28 /* TokenizerStates.SEPARATOR */;
+                            continue;
+                        }
+                        if (n === 32 /* charset.SPACE */ ||
+                            n === 10 /* charset.NEWLINE */ ||
+                            n === 13 /* charset.CARRIAGE_RETURN */ ||
+                            n === 9 /* charset.TAB */) {
+                            // whitespace
+                            continue;
+                        }
+                        if (n === 123 /* charset.LEFT_CURLY_BRACKET */) {
+                            this.onToken({
+                                token: tokenType.LEFT_BRACE,
+                                value: "{",
+                                offset: this.offset,
+                            });
+                            continue;
+                        }
+                        if (n === 125 /* charset.RIGHT_CURLY_BRACKET */) {
+                            this.onToken({
+                                token: tokenType.RIGHT_BRACE,
+                                value: "}",
+                                offset: this.offset,
+                            });
+                            continue;
+                        }
+                        if (n === 91 /* charset.LEFT_SQUARE_BRACKET */) {
+                            this.onToken({
+                                token: tokenType.LEFT_BRACKET,
+                                value: "[",
+                                offset: this.offset,
+                            });
+                            continue;
+                        }
+                        if (n === 93 /* charset.RIGHT_SQUARE_BRACKET */) {
+                            this.onToken({
+                                token: tokenType.RIGHT_BRACKET,
+                                value: "]",
+                                offset: this.offset,
+                            });
+                            continue;
+                        }
+                        if (n === 58 /* charset.COLON */) {
+                            this.onToken({
+                                token: tokenType.COLON,
+                                value: ":",
+                                offset: this.offset,
+                            });
+                            continue;
+                        }
+                        if (n === 44 /* charset.COMMA */) {
+                            this.onToken({
+                                token: tokenType.COMMA,
+                                value: ",",
+                                offset: this.offset,
+                            });
+                            continue;
+                        }
+                        if (n === 116 /* charset.LATIN_SMALL_LETTER_T */) {
+                            this.state = 3 /* TokenizerStates.TRUE1 */;
+                            continue;
+                        }
+                        if (n === 102 /* charset.LATIN_SMALL_LETTER_F */) {
+                            this.state = 6 /* TokenizerStates.FALSE1 */;
+                            continue;
+                        }
+                        if (n === 110 /* charset.LATIN_SMALL_LETTER_N */) {
+                            this.state = 10 /* TokenizerStates.NULL1 */;
+                            continue;
+                        }
+                        if (n === 34 /* charset.QUOTATION_MARK */) {
+                            this.bufferedString.reset();
+                            this.escapedCharsByteLength = 0;
+                            this.state = 13 /* TokenizerStates.STRING_DEFAULT */;
+                            continue;
+                        }
+                        if (n >= 49 /* charset.DIGIT_ONE */ && n <= 57 /* charset.DIGIT_NINE */) {
+                            this.bufferedNumber.reset();
+                            this.bufferedNumber.appendChar(n);
+                            this.state = 22 /* TokenizerStates.NUMBER_AFTER_INITIAL_NON_ZERO */;
+                            continue;
+                        }
+                        if (n === 48 /* charset.DIGIT_ZERO */) {
+                            this.bufferedNumber.reset();
+                            this.bufferedNumber.appendChar(n);
+                            this.state = 21 /* TokenizerStates.NUMBER_AFTER_INITIAL_ZERO */;
+                            continue;
+                        }
+                        if (n === 45 /* charset.HYPHEN_MINUS */) {
+                            this.bufferedNumber.reset();
+                            this.bufferedNumber.appendChar(n);
+                            this.state = 20 /* TokenizerStates.NUMBER_AFTER_INITIAL_MINUS */;
+                            continue;
+                        }
+                        break;
+                    // STRING
+                    case 13 /* TokenizerStates.STRING_DEFAULT */:
+                        if (n === 34 /* charset.QUOTATION_MARK */) {
+                            this.flushPendingHighSurrogate();
+                            const string = this.bufferedString.toString();
+                            this.state = 0 /* TokenizerStates.START */;
+                            this.onToken({
+                                token: tokenType.STRING,
+                                value: string,
+                                offset: this.offset,
+                            });
+                            this.offset +=
+                                this.escapedCharsByteLength +
+                                    this.bufferedString.byteLength +
+                                    1;
+                            continue;
+                        }
+                        if (n === 92 /* charset.REVERSE_SOLIDUS */) {
+                            this.state = 14 /* TokenizerStates.STRING_AFTER_BACKSLASH */;
+                            continue;
+                        }
+                        if (n >= 128) {
+                            this.flushPendingHighSurrogate();
+                            // Decode the whole run of complete multi-byte characters in one
+                            // TextDecoder call, rather than one character at a time -- much
+                            // faster for multi-byte text (CJK/emoji). ASCII stays on the
+                            // per-character appendChar path below.
+                            const runEnd = multiByteRunEnd(buffer, i);
+                            if (runEnd > i) {
+                                this.bufferedString.appendBuf(buffer, i, runEnd);
+                                i = runEnd - 1; // the for-loop's i += 1 lands on runEnd
+                            }
+                            // A character straddling the chunk boundary is carried over to
+                            // the next chunk via STRING_INCOMPLETE_CHAR.
+                            if (runEnd < buffer.length && buffer[runEnd] >= 128) {
+                                this.startIncompleteChar(buffer, runEnd);
+                                i = buffer.length - 1;
+                            }
+                            continue;
+                        }
+                        if (n >= 32 /* charset.SPACE */) {
+                            this.flushPendingHighSurrogate();
+                            let j = i;
+                            while (j < buffer.length) {
+                                const b = buffer[j];
+                                if (b < 32 /* charset.SPACE */ ||
+                                    b >= 128 ||
+                                    b === 34 /* charset.QUOTATION_MARK */ ||
+                                    b === 92 /* charset.REVERSE_SOLIDUS */)
+                                    break;
+                                j += 1;
+                            }
+                            // appendBuf is one TextDecoder call: worth it only once the run is
+                            // long enough to amortize that fixed cost. Short strings (keys,
+                            // ids) dominate real JSON, so append those char-by-char instead --
+                            // always-appendBuf regresses key/record-heavy JSON ~12%.
+                            if (j - i >= 16) {
+                                this.bufferedString.appendBuf(buffer, i, j);
+                            }
+                            else {
+                                for (let k = i; k < j; k += 1)
+                                    this.bufferedString.appendChar(buffer[k]);
+                            }
+                            i = j - 1;
+                            continue;
+                        }
+                        break;
+                    case 19 /* TokenizerStates.STRING_INCOMPLETE_CHAR */: {
+                        // check for carry over of a multi byte char split between data chunks
+                        // & fill temp buffer it with start of this data chunk up to the boundary limit set in the last iteration
+                        // The rest of the sequence might still not be complete if this chunk is smaller
+                        // than the number of bytes still missing (e.g. one byte at a time), so only
+                        // consume what's actually available and keep waiting otherwise.
+                        const available = Math.min(this.bytes_remaining, buffer.length - i);
+                        this.char_split_buffer.set(buffer.subarray(i, i + available), this.bytes_in_sequence - this.bytes_remaining);
+                        this.bytes_remaining -= available;
+                        if (this.bytes_remaining > 0) {
+                            i = buffer.length - 1;
+                            continue;
+                        }
+                        this.bufferedString.appendBuf(this.char_split_buffer, 0, this.bytes_in_sequence);
+                        i += available - 1;
+                        this.state = 13 /* TokenizerStates.STRING_DEFAULT */;
+                        continue;
+                    }
+                    case 14 /* TokenizerStates.STRING_AFTER_BACKSLASH */: {
+                        const controlChar = escapedSequences[n];
+                        if (controlChar) {
+                            this.flushPendingHighSurrogate();
+                            this.bufferedString.appendChar(controlChar);
+                            this.escapedCharsByteLength += 1; // len(\")=2 minus the fact you're appending len(controlChar)=1
+                            this.state = 13 /* TokenizerStates.STRING_DEFAULT */;
+                            continue;
+                        }
+                        if (n === 117 /* charset.LATIN_SMALL_LETTER_U */) {
+                            this.unicode = "";
+                            this.state = 15 /* TokenizerStates.STRING_UNICODE_DIGIT_1 */;
+                            continue;
+                        }
+                        break;
+                    }
+                    case 15 /* TokenizerStates.STRING_UNICODE_DIGIT_1 */:
+                    case 16 /* TokenizerStates.STRING_UNICODE_DIGIT_2 */:
+                    case 17 /* TokenizerStates.STRING_UNICODE_DIGIT_3 */:
+                        if ((n >= 48 /* charset.DIGIT_ZERO */ && n <= 57 /* charset.DIGIT_NINE */) ||
+                            (n >= 65 /* charset.LATIN_CAPITAL_LETTER_A */ &&
+                                n <= 70 /* charset.LATIN_CAPITAL_LETTER_F */) ||
+                            (n >= 97 /* charset.LATIN_SMALL_LETTER_A */ &&
+                                n <= 102 /* charset.LATIN_SMALL_LETTER_F */)) {
+                            this.unicode += String.fromCharCode(n);
+                            this.state += 1;
+                            continue;
+                        }
+                        break;
+                    case 18 /* TokenizerStates.STRING_UNICODE_DIGIT_4 */:
+                        if ((n >= 48 /* charset.DIGIT_ZERO */ && n <= 57 /* charset.DIGIT_NINE */) ||
+                            (n >= 65 /* charset.LATIN_CAPITAL_LETTER_A */ &&
+                                n <= 70 /* charset.LATIN_CAPITAL_LETTER_F */) ||
+                            (n >= 97 /* charset.LATIN_SMALL_LETTER_A */ &&
+                                n <= 102 /* charset.LATIN_SMALL_LETTER_F */)) {
+                            const intVal = parseInt(this.unicode + String.fromCharCode(n), 16);
+                            this.appendUnicodeCodeUnit(intVal);
+                            this.state = 13 /* TokenizerStates.STRING_DEFAULT */;
+                            continue;
+                        }
+                        break;
+                    // Number
+                    case 20 /* TokenizerStates.NUMBER_AFTER_INITIAL_MINUS */:
+                        if (n === 48 /* charset.DIGIT_ZERO */) {
+                            this.bufferedNumber.appendChar(n);
+                            this.state = 21 /* TokenizerStates.NUMBER_AFTER_INITIAL_ZERO */;
+                            continue;
+                        }
+                        if (n >= 49 /* charset.DIGIT_ONE */ && n <= 57 /* charset.DIGIT_NINE */) {
+                            this.bufferedNumber.appendChar(n);
+                            this.state = 22 /* TokenizerStates.NUMBER_AFTER_INITIAL_NON_ZERO */;
+                            continue;
+                        }
+                        break;
+                    case 21 /* TokenizerStates.NUMBER_AFTER_INITIAL_ZERO */:
+                        if (n === 46 /* charset.FULL_STOP */) {
+                            this.bufferedNumber.appendChar(n);
+                            this.state = 23 /* TokenizerStates.NUMBER_AFTER_FULL_STOP */;
+                            continue;
+                        }
+                        if (n === 101 /* charset.LATIN_SMALL_LETTER_E */ ||
+                            n === 69 /* charset.LATIN_CAPITAL_LETTER_E */) {
+                            this.bufferedNumber.appendChar(n);
+                            this.state = 25 /* TokenizerStates.NUMBER_AFTER_E */;
+                            continue;
+                        }
+                        i -= 1;
+                        this.state = 0 /* TokenizerStates.START */;
+                        this.emitNumber();
+                        continue;
+                    case 22 /* TokenizerStates.NUMBER_AFTER_INITIAL_NON_ZERO */:
+                        if (n >= 48 /* charset.DIGIT_ZERO */ && n <= 57 /* charset.DIGIT_NINE */) {
+                            this.bufferedNumber.appendChar(n);
+                            continue;
+                        }
+                        if (n === 46 /* charset.FULL_STOP */) {
+                            this.bufferedNumber.appendChar(n);
+                            this.state = 23 /* TokenizerStates.NUMBER_AFTER_FULL_STOP */;
+                            continue;
+                        }
+                        if (n === 101 /* charset.LATIN_SMALL_LETTER_E */ ||
+                            n === 69 /* charset.LATIN_CAPITAL_LETTER_E */) {
+                            this.bufferedNumber.appendChar(n);
+                            this.state = 25 /* TokenizerStates.NUMBER_AFTER_E */;
+                            continue;
+                        }
+                        i -= 1;
+                        this.state = 0 /* TokenizerStates.START */;
+                        this.emitNumber();
+                        continue;
+                    case 23 /* TokenizerStates.NUMBER_AFTER_FULL_STOP */:
+                        if (n >= 48 /* charset.DIGIT_ZERO */ && n <= 57 /* charset.DIGIT_NINE */) {
+                            this.bufferedNumber.appendChar(n);
+                            this.state = 24 /* TokenizerStates.NUMBER_AFTER_DECIMAL */;
+                            continue;
+                        }
+                        break;
+                    case 24 /* TokenizerStates.NUMBER_AFTER_DECIMAL */:
+                        if (n >= 48 /* charset.DIGIT_ZERO */ && n <= 57 /* charset.DIGIT_NINE */) {
+                            this.bufferedNumber.appendChar(n);
+                            continue;
+                        }
+                        if (n === 101 /* charset.LATIN_SMALL_LETTER_E */ ||
+                            n === 69 /* charset.LATIN_CAPITAL_LETTER_E */) {
+                            this.bufferedNumber.appendChar(n);
+                            this.state = 25 /* TokenizerStates.NUMBER_AFTER_E */;
+                            continue;
+                        }
+                        i -= 1;
+                        this.state = 0 /* TokenizerStates.START */;
+                        this.emitNumber();
+                        continue;
+                    // @ts-expect-error fall through case
+                    case 25 /* TokenizerStates.NUMBER_AFTER_E */:
+                        if (n === 43 /* charset.PLUS_SIGN */ || n === 45 /* charset.HYPHEN_MINUS */) {
+                            this.bufferedNumber.appendChar(n);
+                            this.state = 26 /* TokenizerStates.NUMBER_AFTER_E_AND_SIGN */;
+                            continue;
+                        }
+                    case 26 /* TokenizerStates.NUMBER_AFTER_E_AND_SIGN */:
+                        if (n >= 48 /* charset.DIGIT_ZERO */ && n <= 57 /* charset.DIGIT_NINE */) {
+                            this.bufferedNumber.appendChar(n);
+                            this.state = 27 /* TokenizerStates.NUMBER_AFTER_E_AND_DIGIT */;
+                            continue;
+                        }
+                        break;
+                    case 27 /* TokenizerStates.NUMBER_AFTER_E_AND_DIGIT */:
+                        if (n >= 48 /* charset.DIGIT_ZERO */ && n <= 57 /* charset.DIGIT_NINE */) {
+                            this.bufferedNumber.appendChar(n);
+                            continue;
+                        }
+                        i -= 1;
+                        this.state = 0 /* TokenizerStates.START */;
+                        this.emitNumber();
+                        continue;
+                    // TRUE
+                    case 3 /* TokenizerStates.TRUE1 */:
+                        if (n === 114 /* charset.LATIN_SMALL_LETTER_R */) {
+                            this.state = 4 /* TokenizerStates.TRUE2 */;
+                            continue;
+                        }
+                        break;
+                    case 4 /* TokenizerStates.TRUE2 */:
+                        if (n === 117 /* charset.LATIN_SMALL_LETTER_U */) {
+                            this.state = 5 /* TokenizerStates.TRUE3 */;
+                            continue;
+                        }
+                        break;
+                    case 5 /* TokenizerStates.TRUE3 */:
+                        if (n === 101 /* charset.LATIN_SMALL_LETTER_E */) {
+                            this.state = 0 /* TokenizerStates.START */;
+                            this.onToken({
+                                token: tokenType.TRUE,
+                                value: true,
+                                offset: this.offset,
+                            });
+                            this.offset += 3;
+                            continue;
+                        }
+                        break;
+                    // FALSE
+                    case 6 /* TokenizerStates.FALSE1 */:
+                        if (n === 97 /* charset.LATIN_SMALL_LETTER_A */) {
+                            this.state = 7 /* TokenizerStates.FALSE2 */;
+                            continue;
+                        }
+                        break;
+                    case 7 /* TokenizerStates.FALSE2 */:
+                        if (n === 108 /* charset.LATIN_SMALL_LETTER_L */) {
+                            this.state = 8 /* TokenizerStates.FALSE3 */;
+                            continue;
+                        }
+                        break;
+                    case 8 /* TokenizerStates.FALSE3 */:
+                        if (n === 115 /* charset.LATIN_SMALL_LETTER_S */) {
+                            this.state = 9 /* TokenizerStates.FALSE4 */;
+                            continue;
+                        }
+                        break;
+                    case 9 /* TokenizerStates.FALSE4 */:
+                        if (n === 101 /* charset.LATIN_SMALL_LETTER_E */) {
+                            this.state = 0 /* TokenizerStates.START */;
+                            this.onToken({
+                                token: tokenType.FALSE,
+                                value: false,
+                                offset: this.offset,
+                            });
+                            this.offset += 4;
+                            continue;
+                        }
+                        break;
+                    // NULL
+                    case 10 /* TokenizerStates.NULL1 */:
+                        if (n === 117 /* charset.LATIN_SMALL_LETTER_U */) {
+                            this.state = 11 /* TokenizerStates.NULL2 */;
+                            continue;
+                        }
+                        break;
+                    case 11 /* TokenizerStates.NULL2 */:
+                        if (n === 108 /* charset.LATIN_SMALL_LETTER_L */) {
+                            this.state = 12 /* TokenizerStates.NULL3 */;
+                            continue;
+                        }
+                        break;
+                    case 12 /* TokenizerStates.NULL3 */:
+                        if (n === 108 /* charset.LATIN_SMALL_LETTER_L */) {
+                            this.state = 0 /* TokenizerStates.START */;
+                            this.onToken({
+                                token: tokenType.NULL,
+                                value: null,
+                                offset: this.offset,
+                            });
+                            this.offset += 3;
+                            continue;
+                        }
+                        break;
+                    case 28 /* TokenizerStates.SEPARATOR */:
+                        this.separatorIndex += 1;
+                        if (!this.separatorBytes ||
+                            n !== this.separatorBytes[this.separatorIndex]) {
+                            break;
+                        }
+                        if (this.separatorIndex === this.separatorBytes.length - 1) {
+                            this.state = 0 /* TokenizerStates.START */;
+                            this.onToken({
+                                token: tokenType.SEPARATOR,
+                                value: this.separator,
+                                offset: this.offset + this.separatorIndex,
+                            });
+                            this.separatorIndex = 0;
+                        }
+                        continue;
+                    // BOM support
+                    case 30 /* TokenizerStates.BOM */:
+                        if (n === this.bom[this.bomIndex]) {
+                            if (this.bomIndex === this.bom.length - 1) {
+                                this.state = 0 /* TokenizerStates.START */;
+                                this.bom = undefined;
+                                this.bomIndex = 0;
+                                continue;
+                            }
+                            this.bomIndex += 1;
+                            continue;
+                        }
+                        break;
+                    case 1 /* TokenizerStates.ENDED */:
+                        if (n === 32 /* charset.SPACE */ ||
+                            n === 10 /* charset.NEWLINE */ ||
+                            n === 13 /* charset.CARRIAGE_RETURN */ ||
+                            n === 9 /* charset.TAB */) {
+                            // whitespace
+                            continue;
+                        }
+                }
+                throw new TokenizerError(`Unexpected "${String.fromCharCode(n)}" at chunk position "${i}" (absolute position "${this.streamByteLength + i}") in state ${TokenizerStateToString(this.state)}`);
+            }
+            this.streamByteLength += buffer.length;
+            if (this.emitPartialTokens) {
+                switch (this.state) {
+                    case 3 /* TokenizerStates.TRUE1 */:
+                    case 4 /* TokenizerStates.TRUE2 */:
+                    case 5 /* TokenizerStates.TRUE3 */:
+                        this.onToken({
+                            token: tokenType.TRUE,
+                            value: true,
+                            offset: this.offset,
+                            partial: true,
+                        });
+                        break;
+                    case 6 /* TokenizerStates.FALSE1 */:
+                    case 7 /* TokenizerStates.FALSE2 */:
+                    case 8 /* TokenizerStates.FALSE3 */:
+                    case 9 /* TokenizerStates.FALSE4 */:
+                        this.onToken({
+                            token: tokenType.FALSE,
+                            value: false,
+                            offset: this.offset,
+                            partial: true,
+                        });
+                        break;
+                    case 10 /* TokenizerStates.NULL1 */:
+                    case 11 /* TokenizerStates.NULL2 */:
+                    case 12 /* TokenizerStates.NULL3 */:
+                        this.onToken({
+                            token: tokenType.NULL,
+                            value: null,
+                            offset: this.offset,
+                            partial: true,
+                        });
+                        break;
+                    case 13 /* TokenizerStates.STRING_DEFAULT */: {
+                        const string = this.bufferedString.toString();
+                        this.onToken({
+                            token: tokenType.STRING,
+                            value: string,
+                            offset: this.offset,
+                            partial: true,
+                        });
+                        break;
+                    }
+                    case 21 /* TokenizerStates.NUMBER_AFTER_INITIAL_ZERO */:
+                    case 22 /* TokenizerStates.NUMBER_AFTER_INITIAL_NON_ZERO */:
+                    case 24 /* TokenizerStates.NUMBER_AFTER_DECIMAL */:
+                    case 27 /* TokenizerStates.NUMBER_AFTER_E_AND_DIGIT */:
+                        try {
+                            this.onToken({
+                                token: tokenType.NUMBER,
+                                value: this.parseNumber(this.bufferedNumber.toString()),
+                                offset: this.offset,
+                                partial: true,
+                            });
+                        }
+                        catch (_a) {
+                            // Number couldn't be parsed. Do nothing.
+                        }
+                }
+            }
+        }
+        catch (err) {
+            this.error(err);
+        }
+    }
+    emitNumber() {
+        this.onToken({
+            token: tokenType.NUMBER,
+            value: this.parseNumber(this.bufferedNumber.toString()),
+            offset: this.offset,
+        });
+        this.offset += this.bufferedNumber.byteLength - 1;
+    }
+    /**
+     * Turns the characters of a JSON number into a JavaScript value.
+     *
+     * Equivalent to `Number(numberStr)`. Override it to handle numbers that a
+     * JavaScript number can't represent, for example by keeping them as strings.
+     *
+     * @param numberStr The number, as it appeared in the JSON stream.
+     * @returns The parsed number.
+     */
+    parseNumber(numberStr) {
+        return Number(numberStr);
+    }
+    /**
+     * Puts the tokenizer in an error state and reports `err` through
+     * {@linkcode Tokenizer.onError}. The tokenizer can't be used afterwards.
+     *
+     * @param err What went wrong.
+     */
+    error(err) {
+        if (this.state !== 1 /* TokenizerStates.ENDED */) {
+            this.state = 2 /* TokenizerStates.ERROR */;
+        }
+        this.onError(err);
+    }
+    /**
+     * Signals that the stream is over, flushing any number that was still being
+     * tokenized and then ending the tokenizer, which can't be used afterwards.
+     *
+     * @throws {TokenizerError} If the stream ended in the middle of a token and no
+     * {@linkcode Tokenizer.onError} callback has been set.
+     */
+    end() {
+        switch (this.state) {
+            case 21 /* TokenizerStates.NUMBER_AFTER_INITIAL_ZERO */:
+            case 22 /* TokenizerStates.NUMBER_AFTER_INITIAL_NON_ZERO */:
+            case 24 /* TokenizerStates.NUMBER_AFTER_DECIMAL */:
+            case 27 /* TokenizerStates.NUMBER_AFTER_E_AND_DIGIT */:
+                this.state = 1 /* TokenizerStates.ENDED */;
+                this.emitNumber();
+                this.onEnd();
+                break;
+            case 29 /* TokenizerStates.BOM_OR_START */:
+            case 0 /* TokenizerStates.START */:
+            case 2 /* TokenizerStates.ERROR */:
+                this.state = 1 /* TokenizerStates.ENDED */;
+                this.onEnd();
+                break;
+            default:
+                this.error(new TokenizerError(`Tokenizer ended in the middle of a token (state: ${TokenizerStateToString(this.state)}). Either not all the data was received or the data was invalid.`));
+        }
+    }
+    /**
+     * Called with every token found in the stream. Override it to consume them;
+     * by default it throws.
+     *
+     * @param parsedToken The token and where it was found.
+     */
+    // biome-ignore lint/correctness/noUnusedFunctionParameters: override point; the parameter is part of the public signature
+    onToken(parsedToken) {
+        // Override me
+        throw new TokenizerError('Can\'t emit tokens before the "onToken" callback has been set up.');
+    }
+    /**
+     * Called when the data can't be tokenized. Override it to handle errors
+     * asynchronously; by default it throws, so the error surfaces out of the
+     * {@linkcode Tokenizer.write} or {@linkcode Tokenizer.end} call that caused it.
+     *
+     * @param err What went wrong.
+     */
+    onError(err) {
+        // Override me
+        throw err;
+    }
+    /** Called once the tokenizer has ended. Override it to react to that; by default it does nothing. */
+    onEnd() {
+        // Override me
+    }
+}
+//# sourceMappingURL=tokenizer.js.map
+;// ./node_modules/.pnpm/@streamparser+json@0.0.26/node_modules/@streamparser/json/dist/mjs/tokenparser.js
+/**
+ * A parser that assembles the tokens emitted by the tokenizer into JSON values.
+ *
+ * @example
+ * ```ts
+ * import Tokenizer from "@streamparser/json/tokenizer.js";
+ * import TokenParser from "@streamparser/json/tokenparser.js";
+ *
+ * const tokenizer = new Tokenizer();
+ * const tokenParser = new TokenParser({ paths: ["$.*"] });
+ * tokenizer.onToken = tokenParser.write.bind(tokenParser);
+ * tokenParser.onValue = ({ value }) => {
+ *   // process the value
+ * };
+ *
+ * tokenizer.write('{ "test": ["a"] }');
+ * ```
+ *
+ * @module
+ */
+
+// Parser States
+var TokenParserState;
+(function (TokenParserState) {
+    TokenParserState[TokenParserState["VALUE"] = 0] = "VALUE";
+    TokenParserState[TokenParserState["KEY"] = 1] = "KEY";
+    TokenParserState[TokenParserState["COLON"] = 2] = "COLON";
+    TokenParserState[TokenParserState["COMMA"] = 3] = "COMMA";
+    TokenParserState[TokenParserState["ENDED"] = 4] = "ENDED";
+    TokenParserState[TokenParserState["ERROR"] = 5] = "ERROR";
+    TokenParserState[TokenParserState["SEPARATOR"] = 6] = "SEPARATOR";
+})(TokenParserState || (TokenParserState = {}));
+function TokenParserStateToString(state) {
+    return ["VALUE", "KEY", "COLON", "COMMA", "ENDED", "ERROR", "SEPARATOR"][state];
+}
+// Plain bracket assignment invokes the inherited `Object.prototype.__proto__`
+// setter for that one key name, letting a "__proto__" key in the input alter
+// obj's actual prototype instead of becoming a property of obj. Only that key
+// needs the safe (but slower) Object.defineProperty path -- every other key,
+// i.e. the overwhelming majority, keeps the fast, JIT-friendly assignment.
+function setProperty(obj, key, value) {
+    if (key === "__proto__") {
+        Object.defineProperty(obj, key, {
+            value,
+            writable: true,
+            enumerable: true,
+            configurable: true,
+        });
+        return;
+    }
+    obj[key] = value;
+}
+const tokenparser_defaultOpts = {
+    paths: undefined,
+    keepStack: true,
+    separator: undefined,
+    emitPartialValues: false,
+};
+/** The error thrown when the token parser is misconfigured or gets an unexpected token. */
+class TokenParserError extends Error {
+    /**
+     * @param message What went wrong.
+     */
+    constructor(message) {
+        super(message);
+        // Typescript is broken. This is a workaround
+        Object.setPrototypeOf(this, TokenParserError.prototype);
+    }
+}
+/**
+ * A parser that assembles the tokens emitted by a tokenizer into JSON values.
+ *
+ * Tokens are pushed in with {@linkcode TokenParser.write} and the resulting
+ * values come back through the {@linkcode TokenParser.onValue} callback, which
+ * the user is expected to override. Values are emitted innermost first, as soon
+ * as each one is complete, and can be narrowed down to the ones of interest with
+ * the `paths` option.
+ *
+ * @example
+ * ```ts
+ * import Tokenizer from "@streamparser/json/tokenizer.js";
+ * import TokenParser from "@streamparser/json/tokenparser.js";
+ *
+ * const tokenizer = new Tokenizer();
+ * const tokenParser = new TokenParser();
+ * tokenizer.onToken = tokenParser.write.bind(tokenParser);
+ * tokenParser.onValue = ({ value, key, parent, stack }) => {
+ *   // process the value
+ * };
+ *
+ * tokenizer.write('{ "test": ["a"] }');
+ * // onValue is called 3 times: "a", ["a"] and { test: ["a"] }
+ * ```
+ */
+class TokenParser {
+    /**
+     * @param opts What to emit and how. See {@linkcode TokenParserOptions}.
+     * @throws {TokenParserError} If any of the configured `paths` is not a valid selector.
+     */
+    constructor(opts) {
+        this.state = 0 /* TokenParserState.VALUE */;
+        this.mode = undefined;
+        this.key = undefined;
+        this.value = undefined;
+        this.stack = [];
+        // Tracked explicitly rather than inferred from `value` because keepStack:false
+        // deletes emitted properties from `value`, so Object.keys(value).length can no
+        // longer be trusted to tell an empty object from one whose members were purged.
+        this.memberCount = 0;
+        opts = Object.assign(Object.assign({}, tokenparser_defaultOpts), opts);
+        if (opts.paths) {
+            const root = { children: new Map(), terminal: false };
+            // A match-everything selector makes the whole set match everything, which
+            // we represent by leaving the trie undefined (as with no paths at all).
+            let matchEverything = false;
+            for (const path of opts.paths) {
+                if (path === undefined || path === "$*") {
+                    matchEverything = true;
+                    continue;
+                }
+                if (!path.startsWith("$"))
+                    throw new TokenParserError(`Invalid selector "${path}". Should start with "$".`);
+                const segments = path.split(".").slice(1);
+                if (segments.includes(""))
+                    throw new TokenParserError(`Invalid selector "${path}". ".." syntax not supported.`);
+                let node = root;
+                for (const segment of segments) {
+                    let child = node.children.get(segment);
+                    if (!child) {
+                        child = { children: new Map(), terminal: false };
+                        node.children.set(segment, child);
+                    }
+                    node = child;
+                }
+                node.terminal = true;
+            }
+            if (!matchEverything)
+                this.selectorTrie = root;
+        }
+        this.keepStack = opts.keepStack || false;
+        this.separator = opts.separator;
+        if (!opts.emitPartialValues) {
+            this.emitPartial = () => { };
+        }
+    }
+    shouldEmit() {
+        if (!this.selectorTrie)
+            return true;
+        return this.matchesSelector(this.selectorTrie, 0);
+    }
+    // Depth-first walk of the selector trie down the current value's key path:
+    //   [stack[1].key, ..., stack[n-1].key, this.key]   (n = stack.length)
+    // A value matches iff some branch reaches a terminal node at the exact depth.
+    // Recursion (rather than an explicit frontier) keeps the common single-path
+    // walk allocation-free and short-circuits on the first match, like the old
+    // rescan did, while collapsing its O(number of selectors) cost to O(depth).
+    matchesSelector(node, level) {
+        const keyCount = this.stack.length;
+        if (level === keyCount)
+            return node.terminal;
+        const key = level < keyCount - 1 ? this.stack[level + 1].key : this.key;
+        // "*" matches any key; try it first since it needs no key lookup.
+        const wildcard = node.children.get("*");
+        if (wildcard && this.matchesSelector(wildcard, level + 1))
+            return true;
+        // Then a literal match. Resolving the key to a string allocates for numeric
+        // array indices, so skip it unless there's a literal child to match.
+        const hasLiteralChild = node.children.size > (wildcard ? 1 : 0);
+        if (hasLiteralChild) {
+            const segment = key === null || key === void 0 ? void 0 : key.toString();
+            if (segment !== undefined) {
+                const child = node.children.get(segment);
+                if (child && this.matchesSelector(child, level + 1))
+                    return true;
+            }
+        }
+        return false;
+    }
+    push() {
+        this.stack.push({
+            key: this.key,
+            value: this.value,
+            mode: this.mode,
+            emit: this.shouldEmit(),
+            memberCount: this.memberCount,
+        });
+    }
+    pop() {
+        const value = this.value;
+        // biome-ignore lint/suspicious/noImplicitAnyLet: assigned via the destructuring assignment below
+        let emit;
+        ({
+            key: this.key,
+            value: this.value,
+            mode: this.mode,
+            emit,
+            memberCount: this.memberCount,
+        } = this.stack.pop());
+        this.state =
+            this.mode !== undefined ? 3 /* TokenParserState.COMMA */ : 0 /* TokenParserState.VALUE */;
+        this.emit(value, emit);
+    }
+    emit(value, emit) {
+        if (!this.keepStack &&
+            this.value &&
+            this.stack.every((item) => !item.emit)) {
+            if (Array.isArray(this.value)) {
+                // Shrinking `.length` drops the slot, unlike `delete`, which only leaves a hole
+                this.value.length -= 1;
+            }
+            else {
+                delete this.value[this.key];
+            }
+        }
+        if (emit) {
+            this.onValue({
+                value: value,
+                key: this.key,
+                parent: this.value,
+                stack: this.stack,
+            });
+        }
+        if (this.stack.length === 0) {
+            if (this.separator) {
+                this.state = 6 /* TokenParserState.SEPARATOR */;
+            }
+            else if (this.separator === undefined) {
+                this.end();
+            }
+            // else if separator === '', expect next JSON object.
+        }
+    }
+    emitPartial(value) {
+        if (!this.shouldEmit())
+            return;
+        if (this.state === 1 /* TokenParserState.KEY */) {
+            this.onValue({
+                value: undefined,
+                key: value,
+                parent: this.value,
+                stack: this.stack,
+                partial: true,
+            });
+            return;
+        }
+        this.onValue({
+            value: value,
+            key: this.key,
+            parent: this.value,
+            stack: this.stack,
+            partial: true,
+        });
+    }
+    /** Whether the token parser is ended, and thus no longer accepting tokens. */
+    get isEnded() {
+        return this.state === 4 /* TokenParserState.ENDED */;
+    }
+    /**
+     * Pushes the next token into the parser.
+     *
+     * Parsing happens synchronously, so every value that the token completes is
+     * emitted through {@linkcode TokenParser.onValue} before this returns.
+     *
+     * @param parsedTokenInfo The token to process, as emitted by a tokenizer.
+     * @throws {TokenParserError} If the token can't appear at this point of the
+     * JSON document and no {@linkcode TokenParser.onError} callback has been set.
+     */
+    write({ token, value, partial, }) {
+        try {
+            if (partial) {
+                if (this.state !== 0 /* TokenParserState.VALUE */ &&
+                    this.state !== 1 /* TokenParserState.KEY */) {
+                    throw new TokenParserError(`Unexpected partial ${tokenType[token]} (${JSON.stringify(value)}) in state ${TokenParserStateToString(this.state)}`);
+                }
+                this.emitPartial(value);
+                return;
+            }
+            if (this.state === 0 /* TokenParserState.VALUE */) {
+                if (token === tokenType.STRING ||
+                    token === tokenType.NUMBER ||
+                    token === tokenType.TRUE ||
+                    token === tokenType.FALSE ||
+                    token === tokenType.NULL) {
+                    if (this.mode === 0 /* TokenParserMode.OBJECT */) {
+                        setProperty(this.value, this.key, value);
+                        this.state = 3 /* TokenParserState.COMMA */;
+                        this.memberCount++;
+                    }
+                    else if (this.mode === 1 /* TokenParserMode.ARRAY */) {
+                        this.value.push(value);
+                        this.state = 3 /* TokenParserState.COMMA */;
+                        this.memberCount++;
+                    }
+                    this.emit(value, this.shouldEmit());
+                    return;
+                }
+                if (token === tokenType.LEFT_BRACE) {
+                    this.memberCount++;
+                    this.push();
+                    if (this.mode === 0 /* TokenParserMode.OBJECT */) {
+                        const val = {};
+                        setProperty(this.value, this.key, val);
+                        this.value = val;
+                    }
+                    else if (this.mode === 1 /* TokenParserMode.ARRAY */) {
+                        const val = {};
+                        this.value.push(val);
+                        this.value = val;
+                    }
+                    else {
+                        this.value = {};
+                    }
+                    this.mode = 0 /* TokenParserMode.OBJECT */;
+                    this.state = 1 /* TokenParserState.KEY */;
+                    this.key = undefined;
+                    this.memberCount = 0;
+                    this.emitPartial();
+                    return;
+                }
+                if (token === tokenType.LEFT_BRACKET) {
+                    this.memberCount++;
+                    this.push();
+                    if (this.mode === 0 /* TokenParserMode.OBJECT */) {
+                        const val = [];
+                        setProperty(this.value, this.key, val);
+                        this.value = val;
+                    }
+                    else if (this.mode === 1 /* TokenParserMode.ARRAY */) {
+                        const val = [];
+                        this.value.push(val);
+                        this.value = val;
+                    }
+                    else {
+                        this.value = [];
+                    }
+                    this.mode = 1 /* TokenParserMode.ARRAY */;
+                    this.state = 0 /* TokenParserState.VALUE */;
+                    this.key = 0;
+                    this.memberCount = 0;
+                    this.emitPartial();
+                    return;
+                }
+                if (this.mode === 1 /* TokenParserMode.ARRAY */ &&
+                    token === tokenType.RIGHT_BRACKET &&
+                    this.memberCount === 0) {
+                    this.pop();
+                    return;
+                }
+            }
+            if (this.state === 1 /* TokenParserState.KEY */) {
+                if (token === tokenType.STRING) {
+                    this.key = value;
+                    this.state = 2 /* TokenParserState.COLON */;
+                    this.emitPartial();
+                    return;
+                }
+                if (token === tokenType.RIGHT_BRACE && this.memberCount === 0) {
+                    this.pop();
+                    return;
+                }
+            }
+            if (this.state === 2 /* TokenParserState.COLON */) {
+                if (token === tokenType.COLON) {
+                    this.state = 0 /* TokenParserState.VALUE */;
+                    return;
+                }
+            }
+            if (this.state === 3 /* TokenParserState.COMMA */) {
+                if (token === tokenType.COMMA) {
+                    if (this.mode === 1 /* TokenParserMode.ARRAY */) {
+                        this.state = 0 /* TokenParserState.VALUE */;
+                        this.key += 1;
+                        return;
+                    }
+                    /* istanbul ignore else */
+                    if (this.mode === 0 /* TokenParserMode.OBJECT */) {
+                        this.state = 1 /* TokenParserState.KEY */;
+                        return;
+                    }
+                }
+                if ((token === tokenType.RIGHT_BRACE &&
+                    this.mode === 0 /* TokenParserMode.OBJECT */) ||
+                    (token === tokenType.RIGHT_BRACKET &&
+                        this.mode === 1 /* TokenParserMode.ARRAY */)) {
+                    this.pop();
+                    return;
+                }
+            }
+            if (this.state === 6 /* TokenParserState.SEPARATOR */) {
+                if (token === tokenType.SEPARATOR && value === this.separator) {
+                    this.state = 0 /* TokenParserState.VALUE */;
+                    return;
+                }
+            }
+            // Edge case in which the separator is just whitespace and it's found in the middle of the JSON
+            if (token === tokenType.SEPARATOR &&
+                this.state !== 6 /* TokenParserState.SEPARATOR */ &&
+                Array.from(value)
+                    .map((n) => n.charCodeAt(0))
+                    .every((n) => n === 32 /* charset.SPACE */ ||
+                    n === 10 /* charset.NEWLINE */ ||
+                    n === 13 /* charset.CARRIAGE_RETURN */ ||
+                    n === 9 /* charset.TAB */)) {
+                // whitespace
+                return;
+            }
+            throw new TokenParserError(`Unexpected ${tokenType[token]} (${JSON.stringify(value)}) in state ${TokenParserStateToString(this.state)}`);
+        }
+        catch (err) {
+            this.error(err);
+        }
+    }
+    /**
+     * Puts the token parser in an error state and reports `err` through
+     * {@linkcode TokenParser.onError}. The parser can't be used afterwards.
+     *
+     * @param err What went wrong.
+     */
+    error(err) {
+        if (this.state !== 4 /* TokenParserState.ENDED */) {
+            this.state = 5 /* TokenParserState.ERROR */;
+        }
+        this.onError(err);
+    }
+    /**
+     * Signals that there are no more tokens, ending the token parser, which can't
+     * be used afterwards.
+     *
+     * @throws {Error} If the JSON document was left half-parsed and no
+     * {@linkcode TokenParser.onError} callback has been set.
+     */
+    end() {
+        if ((this.state !== 0 /* TokenParserState.VALUE */ &&
+            this.state !== 6 /* TokenParserState.SEPARATOR */) ||
+            this.stack.length > 0) {
+            this.error(new Error(`Parser ended in mid-parsing (state: ${TokenParserStateToString(this.state)}). Either not all the data was received or the data was invalid.`));
+        }
+        else {
+            this.state = 4 /* TokenParserState.ENDED */;
+            this.onEnd();
+        }
+    }
+    /**
+     * Called with every value that matches the configured `paths`. Override it to
+     * consume them; by default it throws.
+     *
+     * @param parsedElementInfo The value and where it was found. Its `parent` and
+     * `stack` are live references into the parser's in-progress structures, so use
+     * `cloneParsedElementInfo` to snapshot them if they need to outlive the call.
+     */
+    // biome-ignore lint/correctness/noUnusedFunctionParameters: override point; the parameter is part of the public signature
+    onValue(parsedElementInfo) {
+        // Override me
+        throw new TokenParserError('Can\'t emit data before the "onValue" callback has been set up.');
+    }
+    /**
+     * Called when the tokens don't add up to valid JSON. Override it to handle
+     * errors asynchronously; by default it throws, so the error surfaces out of the
+     * {@linkcode TokenParser.write} or {@linkcode TokenParser.end} call that caused it.
+     *
+     * @param err What went wrong.
+     */
+    onError(err) {
+        // Override me
+        throw err;
+    }
+    /** Called once the token parser has ended. Override it to react to that; by default it does nothing. */
+    onEnd() {
+        // Override me
+    }
+}
+//# sourceMappingURL=tokenparser.js.map
+;// ./node_modules/.pnpm/@streamparser+json@0.0.26/node_modules/@streamparser/json/dist/mjs/jsonparser.js
+/**
+ * A streaming drop-in replacement for `JSON.parse`, chaining the tokenizer and
+ * the token parser.
+ *
+ * @example
+ * ```ts
+ * import JSONParser from "@streamparser/json/jsonparser.js";
+ *
+ * const parser = new JSONParser();
+ * parser.onValue = ({ value }) => {
+ *   // process the value
+ * };
+ *
+ * parser.write('{ "test": ["a"] }');
+ * ```
+ *
+ * @module
+ */
+
+
+/**
+ * A full JSON parser: a {@linkcode Tokenizer} and a {@linkcode TokenParser}
+ * wired to each other.
+ *
+ * Data is pushed in with {@linkcode JSONParser.write} and the parsed values come
+ * back through the {@linkcode JSONParser.onValue} callback.
+ *
+ * @example
+ * ```ts
+ * import JSONParser from "@streamparser/json/jsonparser.js";
+ *
+ * const parser = new JSONParser({ paths: ["$.*"], keepStack: false });
+ * parser.onValue = ({ value }) => {
+ *   // process the value
+ * };
+ * parser.onError = (err) => console.error(err);
+ *
+ * // The document can arrive split across any number of chunks.
+ * parser.write('[{ "id": 1 },');
+ * parser.write('{ "id": 2 }]');
+ * ```
+ */
+class JSONParser {
+    /**
+     * @param opts How to tokenize and what to emit. See {@linkcode JSONParserOptions}.
+     */
+    constructor(opts = {}) {
+        this.tokenizer = new Tokenizer(opts);
+        this.tokenParser = new TokenParser(opts);
+        this.tokenizer.onToken = this.tokenParser.write.bind(this.tokenParser);
+        this.tokenizer.onEnd = () => {
+            if (!this.tokenParser.isEnded)
+                this.tokenParser.end();
+        };
+        this.tokenParser.onError = this.tokenizer.error.bind(this.tokenizer);
+        this.tokenParser.onEnd = () => {
+            if (!this.tokenizer.isEnded)
+                this.tokenizer.end();
+        };
+    }
+    /** Whether the parser is ended, and thus no longer accepting data. */
+    get isEnded() {
+        return this.tokenizer.isEnded && this.tokenParser.isEnded;
+    }
+    /**
+     * Pushes the next chunk of the JSON stream into the parser.
+     *
+     * Parsing happens synchronously, so every value that the chunk completes is
+     * emitted through {@linkcode JSONParser.onValue} before this returns.
+     *
+     * @param input The chunk to parse: a string, a `TypedArray`, or any iterable
+     * of utf-8 byte values.
+     * @throws {Error} If the data is not valid JSON and no
+     * {@linkcode JSONParser.onError} callback has been set.
+     */
+    write(input) {
+        this.tokenizer.write(input);
+    }
+    /**
+     * Signals that the stream is over, ending the parser, which can't be used
+     * afterwards.
+     *
+     * @throws {Error} If the JSON document was left half-parsed and no
+     * {@linkcode JSONParser.onError} callback has been set.
+     */
+    end() {
+        this.tokenizer.end();
+    }
+    /** Sets the callback to be called with every token found in the stream. */
+    set onToken(cb) {
+        this.tokenizer.onToken = (parsedToken) => {
+            cb(parsedToken);
+            this.tokenParser.write(parsedToken);
+        };
+    }
+    /** Sets the callback to be called with every value that matches the configured `paths`. */
+    set onValue(cb) {
+        this.tokenParser.onValue = cb;
+    }
+    /**
+     * Sets the callback to be called when the data can't be parsed. Without one,
+     * errors are thrown out of the {@linkcode JSONParser.write} or
+     * {@linkcode JSONParser.end} call that caused them.
+     */
+    set onError(cb) {
+        this.tokenizer.onError = cb;
+    }
+    /** Sets the callback to be called once the parser has ended. */
+    set onEnd(cb) {
+        this.tokenParser.onEnd = () => {
+            if (!this.tokenizer.isEnded)
+                this.tokenizer.end();
+            cb.call(this.tokenParser);
+        };
+    }
+}
+//# sourceMappingURL=jsonparser.js.map
+;// ./node_modules/.pnpm/@streamparser+json@0.0.26/node_modules/@streamparser/json/dist/mjs/utils/types/stackElement.js
+/**
+ * The shape of the token parser's stack, i.e. the chain of containers that a
+ * parsed value is nested in.
+ *
+ * @module
+ */
+/** Whether the container being parsed is a JSON object or a JSON array. */
+var TokenParserMode;
+(function (TokenParserMode) {
+    /** The container is a JSON object, so its members are keyed by property name. */
+    TokenParserMode[TokenParserMode["OBJECT"] = 0] = "OBJECT";
+    /** The container is a JSON array, so its members are keyed by index. */
+    TokenParserMode[TokenParserMode["ARRAY"] = 1] = "ARRAY";
+})(TokenParserMode || (TokenParserMode = {}));
+//# sourceMappingURL=stackElement.js.map
+;// ./node_modules/.pnpm/@streamparser+json@0.0.26/node_modules/@streamparser/json/dist/mjs/index.js
+
+
+
+/** The types of the JSON values that the parser produces. */
+
+
+
+/** The utf-8 byte values that the tokenizer matches the incoming stream against. */
+
+//# sourceMappingURL=index.js.map
 ;// ./src/ShareLinkManager.js
+
 
 
 
@@ -1548,6 +3390,18 @@ class ShareLinkManager {
     async parseShareLink(shareLink) {
         let result = null;
         try {
+            if (shareLink instanceof Blob) {
+                // 文件只保留引用。JSON 分块解析，不再同时持有整份文本和解析结果。
+                for (let offset = 0; offset < shareLink.size; offset += 64 * 1024) {
+                    const prefix = (await shareLink.slice(offset, offset + 64 * 1024).text()).trimStart();
+                    if (!prefix) continue;
+                    if (prefix[0] === '{' || prefix[0] === '[') {
+                        return this._parseJsonShareLink(await this._readJsonBlob(shareLink));
+                    }
+                    break;
+                }
+                shareLink = await shareLink.text();
+            }
             // 尝试作为JSON解析
             const jsonData = this.safeParse(shareLink);
             if (jsonData) {
@@ -1557,23 +3411,48 @@ class ShareLinkManager {
                 result = await this._parseTextShareLink(shareLink, this.usesBase62EtagsInExport, false);
             }
         } catch (error) {
-            return [false, '保存失败: ' + error.message, result];
+            return [false, '保存失败: ' + error.message, [], [], ''];
         }
         return result;
     }
 
+    async _readJsonBlob(file) {
+        const parser = new JSONParser({ paths: ['$'], stringBufferSize: 64 * 1024 });
+        let jsonData;
+        parser.onValue = ({ value }) => { jsonData = value; };
+        for (let offset = 0; offset < file.size; offset += 64 * 1024) {
+            let chunk = new Uint8Array(await file.slice(offset, offset + 64 * 1024).arrayBuffer());
+            if (offset === 0 && chunk[0] === 0xef && chunk[1] === 0xbb && chunk[2] === 0xbf) {
+                chunk = chunk.subarray(3);
+            }
+            parser.write(chunk);
+            this.progress = Math.round(Math.min(offset + chunk.length, file.size) / file.size * 100);
+            this.progressDesc = '正在读取JSON清单... ' + this.progress + '%';
+            // 每块解析后让出主线程，让浏览器更新进度并回收临时缓冲区。
+            await new Promise(resolve => setTimeout(resolve, 0));
+        }
+        if (!parser.isEnded) parser.end();
+        return jsonData;
+    }
+
     /**
-     * 先创建文件夹，给shareFileList添加上parentFolderId，便于保存文件
+     * 根据清单路径创建文件夹，给shareFileList添加上parentFolderId，便于保存文件
      * @param {*} fileList - {etag: string, size: number, path: string, fileName: string}
      * @returns shareFileList - {etag: string, size: number, path: string, fileName: string, parentFolderId: number}
      */
     async _makeDirForFiles(shareFileList, commonPath) {
         const total = shareFileList.length;
-        // 文件夹创建，并为shareFileList添加parentFolderId------------------------------------
-        // 记录文件夹(path)
-        this.progressDesc = `正在创建文件夹...`;
+        this.progressDesc = '正在创建文件夹...';
         let folder = {};
-        // 如果存在commonPath，先创建文件夹
+        const createFolderId = async (parentId, name, path) => {
+            const newFolder = await this.apiClient.mkdir(parentId, name);
+            if (!newFolder.success || !newFolder.folderFileId) {
+                throw new Error(`创建目录失败：${path}`);
+            }
+            await new Promise(resolve => setTimeout(resolve, this.mkdirDelay));
+            return newFolder.folderFileId;
+        };
+        // 如果存在commonPath，先创建其目录
         const rootFolderId = await this.apiClient.getParentFileId();
         if (commonPath) {
             const commonPathParts = commonPath.split('/').filter(part => part !== '');
@@ -1584,9 +3463,7 @@ class ShareLinkManager {
                 const folderName = commonPathParts[i];
 
                 if (!folder[currentPath]) {
-                    const newFolder = await this.apiClient.mkdir(currentParentId, folderName);
-                    await new Promise(resolve => setTimeout(resolve, this.mkdirDelay));
-                    folder[currentPath] = newFolder.folderFileId;
+                    folder[currentPath] = await createFolderId(currentParentId, folderName, currentPath);
                 }
 
                 currentParentId = folder[currentPath];
@@ -1604,13 +3481,9 @@ class ShareLinkManager {
             for (let i = 0; i < itemPath.length; i++) {
                 const path = itemPath.slice(0, i + 1).join('/');
                 if (!folder[path]) {
-                    const newFolderID = await this.apiClient.mkdir(nowParentFolderId, itemPath[i]);
-                    await new Promise(resolve => setTimeout(resolve, this.mkdirDelay));
-                    folder[path] = newFolderID.folderFileId;
-                    nowParentFolderId = newFolderID.folderFileId;
-                } else {
-                    nowParentFolderId = folder[path];
+                    folder[path] = await createFolderId(nowParentFolderId, itemPath[i], path);
                 }
+                nowParentFolderId = folder[path];
 
                 // 任务取消
                 if (this.taskCancel) {
@@ -1643,17 +3516,30 @@ class ShareLinkManager {
             // 任务取消
             if (this.taskCancel) {
                 this.progressDesc = "任务已取消";
+                failedList.push(...shareFileList.slice(i).map(fileInfo => ({
+                    ...fileInfo, error: '任务取消，尚未保存'
+                })));
                 break;
             }
 
             const fileInfo = shareFileList[i];
+            if (fileInfo.parentFolderId == null) {
+                failedList.push({ ...fileInfo, error: '目标目录ID缺失，尚未保存；请重新导入失败链接' });
+                failed++;
+                continue;
+            }
             if (i > 0) {
                 await new Promise(resolve => setTimeout(resolve, this.saveLinkDelay));
             }
 
-            const reuse = await this.apiClient.getFile({
-                etag: fileInfo.etag, size: fileInfo.size, fileName: fileInfo.fileName
-            }, fileInfo.parentFolderId);
+            let reuse;
+            try {
+                reuse = await this.apiClient.getFile({
+                    etag: fileInfo.etag, size: fileInfo.size, fileName: fileInfo.fileName
+                }, fileInfo.parentFolderId);
+            } catch (error) {
+                reuse = [false, '请求失败：' + error.message];
+            }
             if (reuse[0]) {
                 success++;
                 successList.push(fileInfo);
@@ -1687,13 +3573,22 @@ class ShareLinkManager {
 
         const fileInfoList = await this.parseShareLink(content);
         if (!fileInfoList[0]) {
-            saveResult.failed.push(...fileInfoList[3]); // 添加解析失败的文件
+            saveResult.failed.push(...(fileInfoList[3] || [])); // 添加解析失败的文件
             return [false, '保存失败: ' + fileInfoList[1], saveResult];
         }
-        saveResult = await this._saveFileList(await this._makeDirForFiles(fileInfoList[2], fileInfoList[4]));
-        saveResult.failed.push(...fileInfoList[3]); // 添加解析失败的文件
+        try {
+            const files = await this._makeDirForFiles(fileInfoList[2], fileInfoList[4]);
+            if (this.taskCancel) {
+                saveResult.failed.push(...files.map(file => ({ ...file, error: '任务取消，尚未保存' })));
+            } else {
+                saveResult = await this._saveFileList(files);
+            }
+        } catch (error) {
+            saveResult.failed.push(...fileInfoList[2].map(file => ({ ...file, error: error.message })));
+        }
+        saveResult.failed.push(...(fileInfoList[3] || [])); // 添加解析失败的文件
         saveResult.commonPath = fileInfoList[4];
-        return [true, null, saveResult];
+        return [saveResult.failed.length === 0, null, saveResult];
     }
 
     async saveShareLinkOnlyText(shareLink, fileName) {
@@ -1707,8 +3602,10 @@ class ShareLinkManager {
      * @returns
      */
     // // TODO commonPath 处理
-    async retrySaveFailed(FileList) {
-        return [true, null, await this._saveFileList(FileList)];
+    async retrySaveFailed(FileList, commonPath = '') {
+        const result = await this._saveFileList(FileList);
+        result.commonPath = commonPath;
+        return [result.failed.length === 0, null, result];
     }
 
     // ------------------二级秒传链接相关----------------------
@@ -2012,7 +3909,7 @@ class ShareLinkManager {
 
 
 ;// ./src/styles.css
-/* harmony default export */ const styles = (":root{--primary-color:#6366f1;--primary-hover:#4f46e5;--secondary-color:#10b981;--secondary-hover:#059669;--danger-color:#ef4444;--danger-hover:#dc2626;--warning-color:#f59e0b;--warning-hover:#d97706;--info-color:#3b82f6;--info-hover:#2563eb;--background:#ffffff;--surface:#f8fafc;--border:#e2e8f0;--text-primary:#1e293b;--text-secondary:#64748b;--text-tertiary:#94a3b8;--shadow-sm:0 1px 2px 0 rgba(0,0,0,0.05);--shadow:0 4px 6px -1px rgba(0,0,0,0.1),0 2px 4px -1px rgba(0,0,0,0.06);--shadow-lg:0 10px 15px -3px rgba(0,0,0,0.1),0 4px 6px -2px rgba(0,0,0,0.05);--shadow-xl:0 20px 25px -5px rgba(0,0,0,0.1),0 10px 10px -5px rgba(0,0,0,0.04);--radius-sm:6px;--radius:12px;--radius-lg:16px;--transition:all 0.2s cubic-bezier(0.4,0,0.2,1)}\r\n.fs-modal-overlay{position:fixed;top:0;left:0;width:100vw;height:100vh;background:rgba(0,0,0,0.5);backdrop-filter:blur(8px);display:flex;align-items:center;justify-content:center;z-index:9999;animation:fadeIn 0.2s ease-out}\r\n.modal{background:var(--background);border-radius:var(--radius-lg);box-shadow:var(--shadow-xl);width:90%;max-width:500px;max-height:90vh;overflow:hidden;border:1px solid var(--border);transform:translateY(0);animation:slideUp 0.3s cubic-bezier(0.4,0,0.2,1)}\r\n.fs-modal-header{padding:24px 24px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between}\r\n.fs-modal-title{font-size:20px;font-weight:600;color:var(--text-primary);display:flex;align-items:center;gap:8px}\r\n.fs-modal-title svg{width:20px;height:20px}\r\n.fs-modal-close{background:none;border:none;height:32px;display:flex;align-items:center;justify-content:center;color:var(--text-secondary);cursor:pointer;transition:var(--transition)}\r\n.fs-modal-close:hover{background:var(--surface);color:var(--text-primary)}\r\n.fs-modal-content{padding:24px}\r\n.fs-modal-footer{padding:16px 24px 24px;border-top:1px solid var(--border);display:flex;gap:12px;justify-content:flex-end}\r\n.fs-file-input{display:none}\r\n.fs-file-list-container{background:var(--surface);border-radius:var(--radius);padding:16px;margin-bottom:20px;max-height:200px;overflow-y:auto}\r\n.fs-file-list-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}\r\n.fs-file-count{font-size:13px;color:var(--text-secondary);font-weight:500}\r\n.fs-file-list{display:flex;flex-direction:column;gap:8px}\r\n.fs-file-item{font-size:13px;color:var(--text-primary);padding:8px 12px;background:white;border-radius:var(--radius-sm);border:1px solid var(--border);word-break:break-all;line-height:1.4}\r\n.modal textarea{width:100%;min-height:120px;padding:16px;border:2px solid var(--border);border-radius:var(--radius);background:var(--surface);color:var(--text-primary);font-family:'JetBrains Mono','Consolas','Monaco',monospace;font-size:13px;line-height:1.5;resize:vertical;transition:var(--transition);box-sizing:border-box}\r\n.modal textarea:focus{outline:none;border-color:var(--primary-color);box-shadow:0 0 0 3px rgba(99,102,241,0.1)}\r\n.modal textarea.drag-over{border-color:var(--primary-color);background:rgba(99,102,241,0.05)}\r\n.button-group{display:flex;gap:12px;align-items:center}\r\n.btn{padding:10px 20px;border-radius:var(--radius);font-size:14px;font-weight:500;border:none;cursor:pointer;transition:var(--transition);display:inline-flex;align-items:center;justify-content:center;gap:8px;min-width:100px}\r\n.btn:disabled{opacity:0.5;cursor:not-allowed}\r\n.fs-btn-primary{background:linear-gradient(135deg,var(--primary-color),var(--primary-hover));color:white;box-shadow:var(--shadow)}\r\n.fs-btn-primary:hover:not(:disabled){transform:translateY(-1px);box-shadow:var(--shadow-lg)}\r\n.fs-btn-secondary{background:linear-gradient(135deg,var(--secondary-color),var(--secondary-hover));color:white;box-shadow:var(--shadow)}\r\n.fs-btn-secondary:hover:not(:disabled){transform:translateY(-1px);box-shadow:var(--shadow-lg)}\r\n.fs-btn-outline{background:white;color:var(--text-primary);border:1px solid var(--border)}\r\n.fs-btn-outline:hover:not(:disabled){background:var(--surface);border-color:var(--text-secondary)}\r\n.fs-btn-danger{background:var(--danger-color);color:white}\r\n.fs-btn-danger:hover:not(:disabled){background:var(--danger-hover)}\r\n.dropdown{position:relative}\r\n.fs-dropdown-toggle{display:inline-flex;align-items:center;gap:4px}\r\n.fs-dropdown-menu{position:absolute;bottom:100%;left:0;background:white;border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow-lg);min-width:140px;z-index:1001;margin-bottom:8px;opacity:0;transform:translateY(10px);visibility:hidden;transition:var(--transition)}\r\n.dropdown:hover .fs-dropdown-menu{opacity:1;transform:translateY(0);visibility:visible}\r\n/* 透明桥接：伪元素覆盖按钮与菜单之间的 8px 间隙，保持 hover 连续 */\r\n.fs-dropdown-menu::before{content:\"\";position:absolute;top:100%;left:0;right:0;height:8px}\r\n.fs-dropdown-item{padding:10px 16px;font-size:13px;color:var(--text-primary);cursor:pointer;transition:var(--transition);display:flex;align-items:center;gap:8px}\r\n.fs-dropdown-item:hover{background:var(--surface)}\r\n.fs-dropdown-item:first-child{border-radius:var(--radius) var(--radius) 0 0}\r\n.fs-dropdown-item:last-child{border-radius:0 0 var(--radius) var(--radius)}\r\n.fs-dropdown-divider{height:1px;background:var(--border);margin:4px 0}\r\n.toast{position:fixed;top:24px;right:24px;background:white;color:var(--text-primary);padding:12px 20px;border-radius:var(--radius);box-shadow:var(--shadow-lg);z-index:10002;font-size:14px;max-width:320px;animation:slideInRight 0.3s cubic-bezier(0.4,0,0.2,1);border-left:4px solid var(--info-color);display:flex;align-items:center;gap:12px}\r\n.toast.success{border-left-color:var(--secondary-color)}\r\n.toast.error{border-left-color:var(--danger-color)}\r\n.toast.warning{border-left-color:var(--warning-color)}\r\n.toast.info{border-left-color:var(--info-color)}\r\n.toast-icon{width:20px;height:20px}\r\n.fs-progress-modal{animation:modalSlideIn 0.3s cubic-bezier(0.4,0,0.2,1)}\r\n.fs-progress-content{padding:24px;text-align:center}\r\n.fs-progress-title{font-size:18px;font-weight:600;color:var(--text-primary);margin-bottom:20px;word-break:break-all;line-height:1.4}\r\n.fs-progress-bar-container{height:8px;background:var(--surface);border-radius:4px;overflow:hidden;margin-bottom:12px}\r\n.fs-progress-bar{height:100%;background:linear-gradient(90deg,var(--primary-color),var(--secondary-color));border-radius:4px;transition:width 0.3s ease}\r\n.fs-progress-info{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px}\r\n.fs-progress-percent{font-size:16px;font-weight:600;color:var(--primary-color)}\r\n.fs-progress-desc{font-size:13px;color:var(--text-secondary);text-align:left;background:var(--surface);padding:12px;border-radius:var(--radius);margin-top:16px;word-break:break-all;line-height:1.4}\r\n.fs-progress-minimize-btn{position:absolute;top:16px;right:16px;width:32px;height:32px;border-radius:50%;background:var(--surface);border:1px solid var(--border);color:var(--text-secondary);cursor:pointer;display:flex;align-items:center;justify-content:center;transition:var(--transition)}\r\n.fs-progress-minimize-btn:hover{background:var(--border);color:var(--text-primary)}\r\n.minimized-widget{position:fixed;right:24px;bottom:24px;background:white;border-radius:var(--radius);box-shadow:var(--shadow-lg);padding:12px 16px;z-index:10005;min-width:240px;cursor:pointer;transition:var(--transition);border:1px solid var(--border)}\r\n.minimized-widget:hover{transform:translateY(-2px);box-shadow:var(--shadow-xl)}\r\n.fs-widget-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}\r\n.fs-widget-title{font-size:12px;font-weight:500;color:var(--text-primary)}\r\n.fs-widget-badge{background:var(--danger-color);color:white;font-size:11px;font-weight:600;padding:2px 8px;border-radius:10px}\r\n.fs-widget-progress{display:flex;align-items:center;gap:12px}\r\n.fs-widget-bar{flex:1;height:4px;background:var(--surface);border-radius:2px;overflow:hidden}\r\n.fs-widget-fill{height:100%;background:linear-gradient(90deg,var(--primary-color),var(--secondary-color));border-radius:2px}\r\n.fs-widget-percent{font-size:12px;font-weight:600;color:var(--primary-color);min-width:40px}\r\n.fs-task-list-container{margin-top:20px}\r\n.fs-task-toggle{width:100%;padding:10px 16px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);color:var(--text-secondary);font-size:13px;display:flex;align-items:center;justify-content:space-between;cursor:pointer;transition:var(--transition)}\r\n.fs-task-toggle:hover{background:#f1f5f9}\r\n.fs-task-toggle.active{background:var(--primary-color);color:white;border-color:var(--primary-color)}\r\n.fs-task-list{max-height:160px;overflow-y:auto;border:1px solid var(--border);border-top:none;border-radius:0 0 var(--radius) var(--radius);background:white;display:none}\r\n.fs-task-list.show{display:block}\r\n.fs-task-item{padding:12px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;transition:var(--transition)}\r\n.fs-task-item:last-child{border-bottom:none}\r\n.fs-task-item.current{background:rgba(99,102,241,0.05)}\r\n.fs-task-info{display:flex;align-items:center;gap:8px}\r\n.fs-task-icon{width:12px;height:12px;border-radius:50%}\r\n.fs-task-icon.generate{background:var(--secondary-color)}\r\n.fs-task-icon.save{background:var(--info-color)}\r\n.fs-task-icon.retry{background:var(--warning-color)}\r\n.fs-task-name{font-size:13px;color:var(--text-primary)}\r\n.fs-task-status{font-size:12px;color:var(--text-secondary)}\r\n.fs-task-remove{width:24px;height:24px;border-radius:50%;border:none;background:var(--surface);color:var(--text-secondary);cursor:pointer;display:flex;align-items:center;justify-content:center;transition:var(--transition)}\r\n.fs-task-remove:hover{background:var(--danger-color);color:white}\r\n.fs-task-remove:disabled{opacity:0.5;cursor:not-allowed}\r\n.fs-results-content{text-align:left}\r\n.fs-results-stats{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px}\r\n.fs-stat-card{padding:16px;border-radius:var(--radius);text-align:center}\r\n.fs-stat-card.success{background:rgba(16,185,129,0.1);border:1px solid rgba(16,185,129,0.2)}\r\n.fs-stat-card.failed{background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.2)}\r\n.fs-stat-value{font-size:24px;font-weight:700;margin-bottom:4px}\r\n.fs-stat-value.success{color:var(--secondary-color)}\r\n.fs-stat-value.failed{color:var(--danger-color)}\r\n.fs-stat-label{font-size:12px;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.5px}\r\n.fs-failed-list{max-height:200px;overflow-y:auto;background:var(--surface);border-radius:var(--radius);padding:12px}\r\n.fs-failed-item{padding:8px 12px;background:white;border-radius:var(--radius-sm);border:1px solid var(--border);margin-bottom:8px;font-size:12px}\r\n.fs-failed-item:last-child{margin-bottom:0}\r\n.fs-failed-name{color:var(--text-primary);word-break:break-all}\r\n.fs-failed-error{color:var(--danger-color);font-size:11px;margin-top:4px}\r\n.fs-mfy-button-container{position:relative;display:inline-block}\r\n.fs-mfy-button{display:inline-flex;align-items:center;justify-content:center;gap:8px;padding:8px 16px;background:linear-gradient(135deg,#64cc77,#4db366);color:white;border:none;border-radius:var(--radius);font-size:14px;font-weight:500;cursor:pointer;transition:var(--transition);box-shadow:var(--shadow);width:90px;box-sizing:border-box}\r\n.fs-mfy-button:hover{transform:translateY(-1px);box-shadow:var(--shadow-lg)}\r\n.fs-mfy-button svg{width:16px;height:16px}\r\n.fs-mfy-dropdown{position:absolute;top:calc(100% + 4px);left:0;background:white;border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow-lg);min-width:160px;z-index:1000;opacity:0;transform:translateY(-10px);visibility:hidden;transition:var(--transition)}\r\n.fs-mfy-button-container:hover .fs-mfy-dropdown{opacity:1;transform:translateY(0);visibility:visible}\r\n/* 透明桥接：伪元素覆盖按钮与菜单之间的 4px 间隙，保持 hover 连续 */\r\n.fs-mfy-dropdown::before{content:\"\";position:absolute;bottom:100%;left:0;right:0;height:4px}\r\n.fs-mfy-dropdown-item{padding:10px 16px;font-size:13px;color:var(--text-primary);cursor:pointer;transition:var(--transition);display:flex;align-items:center;gap:8px}\r\n.fs-mfy-dropdown-item:hover{background:var(--surface)}\r\n.fs-mfy-dropdown-item:first-child{border-radius:var(--radius) var(--radius) 0 0}\r\n.fs-mfy-dropdown-item:last-child{border-radius:0 0 var(--radius) var(--radius)}\r\n.fs-mfy-dropdown-divider{height:1px;background:var(--border);margin:4px 0}\r\n@keyframes fadeIn{from{opacity:0}\r\nto{opacity:1}\r\n}@keyframes slideUp{from{opacity:0;transform:translateY(20px)}\r\nto{opacity:1;transform:translateY(0)}\r\n}@keyframes slideInRight{from{opacity:0;transform:translateX(100%)}\r\nto{opacity:1;transform:translateX(0)}\r\n}@keyframes modalSlideIn{from{opacity:0;transform:translateY(-20px) scale(0.95)}\r\nto{opacity:1;transform:translateY(0) scale(1)}\r\n}@keyframes pulse{0%,100%{opacity:1}\r\n50%{opacity:0.5}\r\n}.animate-pulse{animation:pulse 2s cubic-bezier(0.4,0,0.6,1) infinite}\r\n/* ============================================================\r\n设置页面样式\r\n============================================================ */\r\n/* 1. 容器与布局 */\r\n.fs-settings-container {display: flex;flex-direction: column;gap: 12px;padding: 4px 0;}\r\n/* 2. 设置行项目 - 卡片感设计 */\r\n.fs-setting-row {display: flex;align-items: center;justify-content: space-between;padding: 16px;background: var(--surface);border-radius: var(--radius);transition: var(--transition);border: 1px solid transparent;}\r\n.fs-setting-row:hover {background: #ffffff;border-color: var(--border);box-shadow: var(--shadow-sm);transform: translateY(-1px);}\r\n.fs-setting-row.readonly {opacity: 0.6;cursor: not-allowed;}\r\n/* 3. 文本信息区 */\r\n.fs-setting-info {display: flex;flex-direction: column;gap: 4px;flex: 1;padding-right: 24px;}\r\n.fs-setting-label-text {font-size: 14.5px;font-weight: 600;color: var(--text-primary);letter-spacing: 0.3px;}\r\n.fs-setting-describe {font-size: 12.5px;color: var(--text-secondary);line-height: 1.5;}\r\n/* 4. 交互控件区 */\r\n.fs-setting-action {display: flex;align-items: center;justify-content: flex-end;min-width: 100px;}\r\n/* 5. Switch 开关 */\r\n.fs-settings-switch {position: relative;display: inline-block;width: 44px;height: 24px;}\r\n.fs-settings-switch input {opacity: 0;width: 0;height: 0;}\r\n.switch-slider {position: absolute;cursor: pointer;top: 0; left: 0; right: 0; bottom: 0;background-color: var(--border);transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);border-radius: 24px;}\r\n.switch-slider:before {position: absolute;content: \"\";height: 18px;width: 18px;left: 3px;bottom: 3px;background-color: white;transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);border-radius: 50%;box-shadow: 0 2px 4px rgba(0,0,0,0.1);}\r\n.fs-settings-switch input:checked + .switch-slider {background-color: var(--primary-color);}\r\n.fs-settings-switch input:focus + .switch-slider {box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.2);}\r\n.fs-settings-switch input:checked + .switch-slider:before {transform: translateX(20px);}\r\n/* 6. 分段选择器 (Segmented Radio) */\r\n.fs-settings-radio-group {display: flex;background: #eef2f6;padding: 3px;border-radius: 10px;gap: 2px;}\r\n.fs-reset-tab {cursor: pointer;position: relative;}\r\n.fs-reset-tab input {position: absolute;opacity: 0;}\r\n.fs-reset-tab span {display: block;padding: 6px 14px;font-size: 12px;font-weight: 500;border-radius: 7px;color: var(--text-secondary);transition: all 0.2s;}\r\n.fs-reset-tab input:checked + span {background: white;color: var(--primary-color);box-shadow: var(--shadow-sm);}\r\n/* 7. 输入框与下拉框 */\r\n.fs-settings-input, .fs-settings-select {width: 100%;max-width: 180px;padding: 8px 12px;border: 1.5px solid var(--border);border-radius: var(--radius-sm);background: #ffffff !important;color: var(--text-primary);font-size: 13px;transition: var(--transition);}\r\n.fs-settings-input:focus, .fs-settings-select:focus {border-color: var(--primary-color);outline: none;box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.1);}\r\n/* 8. 底部状态反馈样式 */\r\n.fs-settings-status {flex: 1;font-size: 13px;display: flex;align-items: center;gap: 6px;}\r\n.fs-status-warning {color: var(--warning-color);background: rgba(245, 158, 11, 0.1);padding: 4px 10px;border-radius: 20px;}\r\n.fs-status-success {color: var(--secondary-color);animation: fadeIn 0.3s ease;}\r\n/* 9. 底部按钮组微调 */\r\n.fs-modal-footer .button-group {display: flex;gap: 10px;}\r\n.fs-reset-default-btn {margin-right: auto; /* 将恢复默认按钮推向最左侧 */color: var(--text-secondary) !important;}\r\n.fs-reset-default-btn:hover {color: var(--danger-color) !important;border-color: var(--danger-color) !important;}/* 模态框布局固定 */\r\n.fs-settings-modal-box {width: 90%;max-width: 600px;max-height: 85vh; /* 限制最高高度 */display: flex;flex-direction: column; /* 纵向排列 Header, Content, Footer */}\r\n/* 内容滚动区 */\r\n.fs-settings-scroll-area {flex: 1; /* 自动占据剩余高度 */overflow-y: auto; /* 关键：设置项过多时在此滚动 */padding: 24px;background: #ffffff;}\r\n/* 只读行样式 */\r\n.fs-setting-row.readonly-row {background: #f1f5f9; /* 灰色背景 */opacity: 0.75;cursor: not-allowed;border: 1px dashed var(--border);}\r\n.fs-setting-row.readonly-row:hover {transform: none;box-shadow: none;}\r\n.readonly-badge {background: var(--text-tertiary);color: white;font-size: 10px;padding: 2px 6px;border-radius: 4px;margin-left: 8px;vertical-align: middle;}\r\n/* 禁用控件样式 */\r\n.fs-settings-switch.readonly, \r\n.fs-settings-radio-group.readonly,\r\n.fs-settings-select:disabled,\r\n.fs-settings-input:read-only {pointer-events: none; /* 禁止点击 */filter: grayscale(1); /* 置灰 */}\r\n/* Footer 固定在底部 */\r\n.fs-modal-footer {flex-shrink: 0;background: white;z-index: 10;}");
+/* harmony default export */ const styles = (":root{--primary-color:#6366f1;--primary-hover:#4f46e5;--secondary-color:#10b981;--secondary-hover:#059669;--danger-color:#ef4444;--danger-hover:#dc2626;--warning-color:#f59e0b;--warning-hover:#d97706;--info-color:#3b82f6;--info-hover:#2563eb;--background:#ffffff;--surface:#f8fafc;--border:#e2e8f0;--text-primary:#1e293b;--text-secondary:#64748b;--text-tertiary:#94a3b8;--shadow-sm:0 1px 2px 0 rgba(0,0,0,0.05);--shadow:0 4px 6px -1px rgba(0,0,0,0.1),0 2px 4px -1px rgba(0,0,0,0.06);--shadow-lg:0 10px 15px -3px rgba(0,0,0,0.1),0 4px 6px -2px rgba(0,0,0,0.05);--shadow-xl:0 20px 25px -5px rgba(0,0,0,0.1),0 10px 10px -5px rgba(0,0,0,0.04);--radius-sm:6px;--radius:12px;--radius-lg:16px;--transition:all 0.2s cubic-bezier(0.4,0,0.2,1)}\r\n.fs-modal-overlay{position:fixed;top:0;left:0;width:100vw;height:100vh;background:rgba(0,0,0,0.5);backdrop-filter:blur(8px);display:flex;align-items:center;justify-content:center;z-index:9999;animation:fadeIn 0.2s ease-out}\r\n.modal{background:var(--background);border-radius:var(--radius-lg);box-shadow:var(--shadow-xl);width:90%;max-width:500px;max-height:90vh;overflow:hidden;border:1px solid var(--border);transform:translateY(0);animation:slideUp 0.3s cubic-bezier(0.4,0,0.2,1)}\r\n.fs-modal-header{padding:24px 24px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between}\r\n.fs-modal-title{font-size:20px;font-weight:600;color:var(--text-primary);display:flex;align-items:center;gap:8px}\r\n.fs-modal-title svg{width:20px;height:20px}\r\n.fs-modal-close{background:none;border:none;height:32px;display:flex;align-items:center;justify-content:center;color:var(--text-secondary);cursor:pointer;transition:var(--transition)}\r\n.fs-modal-close:hover{background:var(--surface);color:var(--text-primary)}\r\n.fs-modal-content{padding:24px}\r\n.fs-modal-footer{padding:16px 24px 24px;border-top:1px solid var(--border);display:flex;gap:12px;justify-content:flex-end}\r\n.fs-file-input{display:none}\r\n.fs-file-list-container{background:var(--surface);border-radius:var(--radius);padding:16px;margin-bottom:20px;max-height:200px;overflow-y:auto}\r\n.fs-file-list-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}\r\n.fs-file-count{font-size:13px;color:var(--text-secondary);font-weight:500}\r\n.fs-file-list{display:flex;flex-direction:column;gap:8px}\r\n.fs-file-item{font-size:13px;color:var(--text-primary);padding:8px 12px;background:white;border-radius:var(--radius-sm);border:1px solid var(--border);word-break:break-all;line-height:1.4}\r\n.modal textarea{width:100%;min-height:120px;padding:16px;border:2px solid var(--border);border-radius:var(--radius);background:var(--surface);color:var(--text-primary);font-family:'JetBrains Mono','Consolas','Monaco',monospace;font-size:13px;line-height:1.5;resize:vertical;transition:var(--transition);box-sizing:border-box}\r\n.modal textarea:focus{outline:none;border-color:var(--primary-color);box-shadow:0 0 0 3px rgba(99,102,241,0.1)}\r\n.modal textarea.drag-over{border-color:var(--primary-color);background:rgba(99,102,241,0.05)}\r\n.button-group{display:flex;gap:12px;align-items:center}\r\n.btn{padding:10px 20px;border-radius:var(--radius);font-size:14px;font-weight:500;border:none;cursor:pointer;transition:var(--transition);display:inline-flex;align-items:center;justify-content:center;gap:8px;min-width:100px}\r\n.btn:disabled{opacity:0.5;cursor:not-allowed}\r\n.fs-btn-primary{background:linear-gradient(135deg,var(--primary-color),var(--primary-hover));color:white;box-shadow:var(--shadow)}\r\n.fs-btn-primary:hover:not(:disabled){transform:translateY(-1px);box-shadow:var(--shadow-lg)}\r\n.fs-btn-secondary{background:linear-gradient(135deg,var(--secondary-color),var(--secondary-hover));color:white;box-shadow:var(--shadow)}\r\n.fs-btn-secondary:hover:not(:disabled){transform:translateY(-1px);box-shadow:var(--shadow-lg)}\r\n.fs-btn-outline{background:white;color:var(--text-primary);border:1px solid var(--border)}\r\n.fs-btn-outline:hover:not(:disabled){background:var(--surface);border-color:var(--text-secondary)}\r\n.fs-btn-danger{background:var(--danger-color);color:white}\r\n.fs-btn-danger:hover:not(:disabled){background:var(--danger-hover)}\r\n.dropdown{position:relative}\r\n.fs-dropdown-toggle{display:inline-flex;align-items:center;gap:4px}\r\n.fs-dropdown-menu{position:absolute;bottom:100%;left:0;background:white;border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow-lg);min-width:140px;z-index:1001;margin-bottom:8px;opacity:0;transform:translateY(10px);visibility:hidden;transition:var(--transition)}\r\n.dropdown:hover .fs-dropdown-menu{opacity:1;transform:translateY(0);visibility:visible}\r\n/* 透明桥接：伪元素覆盖按钮与菜单之间的 8px 间隙，保持 hover 连续 */\r\n.fs-dropdown-menu::before{content:\"\";position:absolute;top:100%;left:0;right:0;height:8px}\r\n.fs-dropdown-item{padding:10px 16px;font-size:13px;color:var(--text-primary);cursor:pointer;transition:var(--transition);display:flex;align-items:center;gap:8px}\r\n.fs-dropdown-item:hover{background:var(--surface)}\r\n.fs-dropdown-item:first-child{border-radius:var(--radius) var(--radius) 0 0}\r\n.fs-dropdown-item:last-child{border-radius:0 0 var(--radius) var(--radius)}\r\n.fs-dropdown-divider{height:1px;background:var(--border);margin:4px 0}\r\n.toast{position:fixed;top:24px;right:24px;background:white;color:var(--text-primary);padding:12px 20px;border-radius:var(--radius);box-shadow:var(--shadow-lg);z-index:10002;font-size:14px;max-width:320px;animation:slideInRight 0.3s cubic-bezier(0.4,0,0.2,1);border-left:4px solid var(--info-color);display:flex;align-items:center;gap:12px}\r\n.toast.success{border-left-color:var(--secondary-color)}\r\n.toast.error{border-left-color:var(--danger-color)}\r\n.toast.warning{border-left-color:var(--warning-color)}\r\n.toast.info{border-left-color:var(--info-color)}\r\n.toast-icon{width:20px;height:20px}\r\n.fs-progress-modal{animation:modalSlideIn 0.3s cubic-bezier(0.4,0,0.2,1)}\r\n.fs-progress-content{padding:24px;text-align:center}\r\n.fs-progress-title{font-size:18px;font-weight:600;color:var(--text-primary);margin-bottom:20px;word-break:break-all;line-height:1.4}\r\n.fs-progress-bar-container{height:8px;background:var(--surface);border-radius:4px;overflow:hidden;margin-bottom:12px}\r\n.fs-progress-bar{height:100%;background:linear-gradient(90deg,var(--primary-color),var(--secondary-color));border-radius:4px;transition:width 0.3s ease}\r\n.fs-progress-info{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px}\r\n.fs-progress-percent{font-size:16px;font-weight:600;color:var(--primary-color)}\r\n.fs-progress-desc{font-size:13px;color:var(--text-secondary);text-align:left;background:var(--surface);padding:12px;border-radius:var(--radius);margin-top:16px;word-break:break-all;line-height:1.4}\r\n.fs-progress-minimize-btn{position:absolute;top:16px;right:16px;width:32px;height:32px;border-radius:50%;background:var(--surface);border:1px solid var(--border);color:var(--text-secondary);cursor:pointer;display:flex;align-items:center;justify-content:center;transition:var(--transition)}\r\n.fs-progress-minimize-btn:hover{background:var(--border);color:var(--text-primary)}\r\n.minimized-widget{position:fixed;right:24px;bottom:24px;background:white;border-radius:var(--radius);box-shadow:var(--shadow-lg);padding:12px 16px;z-index:10005;min-width:240px;cursor:pointer;transition:var(--transition);border:1px solid var(--border)}\r\n.minimized-widget:hover{transform:translateY(-2px);box-shadow:var(--shadow-xl)}\r\n.fs-widget-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}\r\n.fs-widget-title{font-size:12px;font-weight:500;color:var(--text-primary)}\r\n.fs-widget-badge{background:var(--danger-color);color:white;font-size:11px;font-weight:600;padding:2px 8px;border-radius:10px}\r\n.fs-widget-progress{display:flex;align-items:center;gap:12px}\r\n.fs-widget-bar{flex:1;height:4px;background:var(--surface);border-radius:2px;overflow:hidden}\r\n.fs-widget-fill{height:100%;background:linear-gradient(90deg,var(--primary-color),var(--secondary-color));border-radius:2px}\r\n.fs-widget-percent{font-size:12px;font-weight:600;color:var(--primary-color);min-width:40px}\r\n.fs-task-list-container{margin-top:20px}\r\n.fs-task-toggle{width:100%;padding:10px 16px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);color:var(--text-secondary);font-size:13px;display:flex;align-items:center;justify-content:space-between;cursor:pointer;transition:var(--transition)}\r\n.fs-task-toggle:hover{background:#f1f5f9}\r\n.fs-task-toggle.active{background:var(--primary-color);color:white;border-color:var(--primary-color)}\r\n.fs-task-list{max-height:160px;overflow-y:auto;border:1px solid var(--border);border-top:none;border-radius:0 0 var(--radius) var(--radius);background:white;display:none}\r\n.fs-task-list.show{display:block}\r\n.fs-task-item{padding:12px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;transition:var(--transition)}\r\n.fs-task-item:last-child{border-bottom:none}\r\n.fs-task-item.current{background:rgba(99,102,241,0.05)}\r\n.fs-task-info{display:flex;align-items:center;gap:8px}\r\n.fs-task-icon{width:12px;height:12px;border-radius:50%}\r\n.fs-task-icon.generate{background:var(--secondary-color)}\r\n.fs-task-icon.save{background:var(--info-color)}\r\n.fs-task-icon.retry{background:var(--warning-color)}\r\n.fs-task-name{font-size:13px;color:var(--text-primary)}\r\n.fs-task-status{font-size:12px;color:var(--text-secondary)}\r\n.fs-task-remove{width:24px;height:24px;border-radius:50%;border:none;background:var(--surface);color:var(--text-secondary);cursor:pointer;display:flex;align-items:center;justify-content:center;transition:var(--transition)}\r\n.fs-task-remove:hover{background:var(--danger-color);color:white}\r\n.fs-task-remove:disabled{opacity:0.5;cursor:not-allowed}\r\n.fs-results-content{text-align:left}\n.fs-results-modal{display:flex;flex-direction:column}\n.fs-results-modal .fs-results-content{min-height:0;overflow-y:auto}\n.fs-results-modal .fs-modal-header,.fs-results-modal .fs-modal-footer{flex-shrink:0}\n.fs-results-modal .fs-modal-footer{flex-wrap:wrap}\n.fs-results-stats{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px}\r\n.fs-stat-card{padding:16px;border-radius:var(--radius);text-align:center}\r\n.fs-stat-card.success{background:rgba(16,185,129,0.1);border:1px solid rgba(16,185,129,0.2)}\r\n.fs-stat-card.failed{background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.2)}\r\n.fs-stat-value{font-size:24px;font-weight:700;margin-bottom:4px}\r\n.fs-stat-value.success{color:var(--secondary-color)}\r\n.fs-stat-value.failed{color:var(--danger-color)}\r\n.fs-stat-label{font-size:12px;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.5px}\r\n.fs-failed-list{max-height:200px;overflow-y:auto;background:var(--surface);border-radius:var(--radius);padding:12px}\r\n.fs-failed-item{padding:8px 12px;background:white;border-radius:var(--radius-sm);border:1px solid var(--border);margin-bottom:8px;font-size:12px}\r\n.fs-failed-item:last-child{margin-bottom:0}\r\n.fs-failed-name{color:var(--text-primary);word-break:break-all}\r\n.fs-failed-error{color:var(--danger-color);font-size:11px;margin-top:4px}\r\n.fs-mfy-button-container{position:relative;display:inline-block}\r\n.fs-mfy-button{display:inline-flex;align-items:center;justify-content:center;gap:8px;padding:8px 16px;background:linear-gradient(135deg,#64cc77,#4db366);color:white;border:none;border-radius:var(--radius);font-size:14px;font-weight:500;cursor:pointer;transition:var(--transition);box-shadow:var(--shadow);width:90px;box-sizing:border-box}\r\n.fs-mfy-button:hover{transform:translateY(-1px);box-shadow:var(--shadow-lg)}\r\n.fs-mfy-button svg{width:16px;height:16px}\r\n.fs-mfy-dropdown{position:absolute;top:calc(100% + 4px);left:0;background:white;border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow-lg);min-width:160px;z-index:1000;opacity:0;transform:translateY(-10px);visibility:hidden;transition:var(--transition)}\r\n.fs-mfy-button-container:hover .fs-mfy-dropdown{opacity:1;transform:translateY(0);visibility:visible}\r\n/* 透明桥接：伪元素覆盖按钮与菜单之间的 4px 间隙，保持 hover 连续 */\r\n.fs-mfy-dropdown::before{content:\"\";position:absolute;bottom:100%;left:0;right:0;height:4px}\r\n.fs-mfy-dropdown-item{padding:10px 16px;font-size:13px;color:var(--text-primary);cursor:pointer;transition:var(--transition);display:flex;align-items:center;gap:8px}\r\n.fs-mfy-dropdown-item:hover{background:var(--surface)}\r\n.fs-mfy-dropdown-item:first-child{border-radius:var(--radius) var(--radius) 0 0}\r\n.fs-mfy-dropdown-item:last-child{border-radius:0 0 var(--radius) var(--radius)}\r\n.fs-mfy-dropdown-divider{height:1px;background:var(--border);margin:4px 0}\r\n@keyframes fadeIn{from{opacity:0}\r\nto{opacity:1}\r\n}@keyframes slideUp{from{opacity:0;transform:translateY(20px)}\r\nto{opacity:1;transform:translateY(0)}\r\n}@keyframes slideInRight{from{opacity:0;transform:translateX(100%)}\r\nto{opacity:1;transform:translateX(0)}\r\n}@keyframes modalSlideIn{from{opacity:0;transform:translateY(-20px) scale(0.95)}\r\nto{opacity:1;transform:translateY(0) scale(1)}\r\n}@keyframes pulse{0%,100%{opacity:1}\r\n50%{opacity:0.5}\r\n}.animate-pulse{animation:pulse 2s cubic-bezier(0.4,0,0.6,1) infinite}\r\n/* ============================================================\r\n设置页面样式\r\n============================================================ */\r\n/* 1. 容器与布局 */\r\n.fs-settings-container {display: flex;flex-direction: column;gap: 12px;padding: 4px 0;}\r\n/* 2. 设置行项目 - 卡片感设计 */\r\n.fs-setting-row {display: flex;align-items: center;justify-content: space-between;padding: 16px;background: var(--surface);border-radius: var(--radius);transition: var(--transition);border: 1px solid transparent;}\r\n.fs-setting-row:hover {background: #ffffff;border-color: var(--border);box-shadow: var(--shadow-sm);transform: translateY(-1px);}\r\n.fs-setting-row.readonly {opacity: 0.6;cursor: not-allowed;}\r\n/* 3. 文本信息区 */\r\n.fs-setting-info {display: flex;flex-direction: column;gap: 4px;flex: 1;padding-right: 24px;}\r\n.fs-setting-label-text {font-size: 14.5px;font-weight: 600;color: var(--text-primary);letter-spacing: 0.3px;}\r\n.fs-setting-describe {font-size: 12.5px;color: var(--text-secondary);line-height: 1.5;}\r\n/* 4. 交互控件区 */\r\n.fs-setting-action {display: flex;align-items: center;justify-content: flex-end;min-width: 100px;}\r\n/* 5. Switch 开关 */\r\n.fs-settings-switch {position: relative;display: inline-block;width: 44px;height: 24px;}\r\n.fs-settings-switch input {opacity: 0;width: 0;height: 0;}\r\n.switch-slider {position: absolute;cursor: pointer;top: 0; left: 0; right: 0; bottom: 0;background-color: var(--border);transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);border-radius: 24px;}\r\n.switch-slider:before {position: absolute;content: \"\";height: 18px;width: 18px;left: 3px;bottom: 3px;background-color: white;transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);border-radius: 50%;box-shadow: 0 2px 4px rgba(0,0,0,0.1);}\r\n.fs-settings-switch input:checked + .switch-slider {background-color: var(--primary-color);}\r\n.fs-settings-switch input:focus + .switch-slider {box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.2);}\r\n.fs-settings-switch input:checked + .switch-slider:before {transform: translateX(20px);}\r\n/* 6. 分段选择器 (Segmented Radio) */\r\n.fs-settings-radio-group {display: flex;background: #eef2f6;padding: 3px;border-radius: 10px;gap: 2px;}\r\n.fs-reset-tab {cursor: pointer;position: relative;}\r\n.fs-reset-tab input {position: absolute;opacity: 0;}\r\n.fs-reset-tab span {display: block;padding: 6px 14px;font-size: 12px;font-weight: 500;border-radius: 7px;color: var(--text-secondary);transition: all 0.2s;}\r\n.fs-reset-tab input:checked + span {background: white;color: var(--primary-color);box-shadow: var(--shadow-sm);}\r\n/* 7. 输入框与下拉框 */\r\n.fs-settings-input, .fs-settings-select {width: 100%;max-width: 180px;padding: 8px 12px;border: 1.5px solid var(--border);border-radius: var(--radius-sm);background: #ffffff !important;color: var(--text-primary);font-size: 13px;transition: var(--transition);}\r\n.fs-settings-input:focus, .fs-settings-select:focus {border-color: var(--primary-color);outline: none;box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.1);}\r\n/* 8. 底部状态反馈样式 */\r\n.fs-settings-status {flex: 1;font-size: 13px;display: flex;align-items: center;gap: 6px;}\r\n.fs-status-warning {color: var(--warning-color);background: rgba(245, 158, 11, 0.1);padding: 4px 10px;border-radius: 20px;}\r\n.fs-status-success {color: var(--secondary-color);animation: fadeIn 0.3s ease;}\r\n/* 9. 底部按钮组微调 */\r\n.fs-modal-footer .button-group {display: flex;gap: 10px;}\r\n.fs-reset-default-btn {margin-right: auto; /* 将恢复默认按钮推向最左侧 */color: var(--text-secondary) !important;}\r\n.fs-reset-default-btn:hover {color: var(--danger-color) !important;border-color: var(--danger-color) !important;}/* 模态框布局固定 */\r\n.fs-settings-modal-box {width: 90%;max-width: 600px;max-height: 85vh; /* 限制最高高度 */display: flex;flex-direction: column; /* 纵向排列 Header, Content, Footer */}\r\n/* 内容滚动区 */\r\n.fs-settings-scroll-area {flex: 1; /* 自动占据剩余高度 */overflow-y: auto; /* 关键：设置项过多时在此滚动 */padding: 24px;background: #ffffff;}\r\n/* 只读行样式 */\r\n.fs-setting-row.readonly-row {background: #f1f5f9; /* 灰色背景 */opacity: 0.75;cursor: not-allowed;border: 1px dashed var(--border);}\r\n.fs-setting-row.readonly-row:hover {transform: none;box-shadow: none;}\r\n.readonly-badge {background: var(--text-tertiary);color: white;font-size: 10px;padding: 2px 6px;border-radius: 4px;margin-left: 8px;vertical-align: middle;}\r\n/* 禁用控件样式 */\r\n.fs-settings-switch.readonly, \r\n.fs-settings-radio-group.readonly,\r\n.fs-settings-select:disabled,\r\n.fs-settings-input:read-only {pointer-events: none; /* 禁止点击 */filter: grayscale(1); /* 置灰 */}\r\n/* Footer 固定在底部 */\r\n.fs-modal-footer {flex-shrink: 0;background: white;z-index: 10;}\n");
 ;// ./src/UiManager.js
 
 
@@ -2024,6 +3921,8 @@ const UiManager_log = createLogger('UI');
 class UiManager {
     constructor(shareLinkManager, selector, firstTime = false) {
         this.firstTime = firstTime;
+        this.importedFiles = new WeakMap();
+        this.copyContents = new WeakMap();
         this.shareLinkManager = shareLinkManager;
         this.selector = selector;
         this.isProgressMinimized = false;
@@ -2087,7 +3986,7 @@ class UiManager {
         }, {
             key: "saveLinkDelay", label: "保存链接延时 (毫秒)", type: "number", value: GlobalConfig.saveLinkDelay
         }, { key: "mkdirDelay", label: "创建文件夹延时 (毫秒)", type: "number", value: GlobalConfig.mkdirDelay }, {
-            key: "maxTextFileSize",
+            key: "MAX_TEXT_FILE_SIZE",
             label: "文本文件最大大小 (字节)",
             type: "number",
             value: GlobalConfig.MAX_TEXT_FILE_SIZE
@@ -2169,9 +4068,9 @@ class UiManager {
                 }, description: '保存秒传链接'
             }, 'retry': {
                 addTask: function (params = {}) {
-                    return { type: 'retry', params: { fileList: params.fileList } };
+                    return { type: 'retry', params: { fileList: params.fileList, commonPath: params.commonPath } };
                 }, handler: async function (task) {
-                    await this.launchSaveLink(task.params.fileList, true);
+                    await this.launchSaveLink(task.params.fileList, true, task.params.commonPath);
                 }, description: '重试保存失败的文件'
             }, 'saveOnlyLink': {
                 addTask: function (params = {}) {
@@ -2547,10 +4446,10 @@ class UiManager {
         const fileListHtml = Array.isArray(this.shareLinkManager.fileInfoList) && allFilePath.length > 0 ? `
             <div class="fs-file-list-container">
                 <div class="fs-file-list-header">
-                    <div class="fs-file-count">文件列表（共${allFilePath.length}个）</div>
+                    <div class="fs-file-count">文件列表（共${allFilePath.length}个${allFilePath.length > 100 ? '，只显示前100个' : ''}）</div>
                 </div>
                 <div class="fs-file-list">
-                    ${allFilePath.map(f => `
+                    ${allFilePath.slice(0, 100).map(f => `
                         <div class="fs-file-item">${f}</div>
                     `).join('')}
                 </div>
@@ -2578,7 +4477,8 @@ class UiManager {
             </div>
             <div class="fs-modal-content">
                 ${fileListHtml}
-                <textarea id="copyText" placeholder="请输入或粘贴秒传链接...">${defaultText}</textarea>
+                <textarea id="copyText" placeholder="请输入或粘贴秒传链接..."></textarea>
+                ${defaultText.length > 16 * 1024 ? '<div class="fs-file-count">内容较大，仅显示预览；复制和导出使用完整内容</div>' : ''}
             </div>
             <div class="fs-modal-footer">
                 <button class="btn fs-btn-primary" id="copyJsonButton">
@@ -2608,6 +4508,13 @@ class UiManager {
             </div>
         </div>
     `;
+
+        const copyText = modalOverlay.querySelector('#copyText');
+        copyText.value = defaultText.slice(0, 16 * 1024);
+        if (defaultText.length > 16 * 1024) {
+            copyText.readOnly = true;
+            this.copyContents.set(copyText, defaultText);
+        }
 
         // 复制JSON按钮事件
         modalOverlay.querySelector('#copyJsonButton').addEventListener('click', (e) => {
@@ -2650,7 +4557,7 @@ class UiManager {
         const inputField = document.querySelector('#copyText');
         if (!inputField) return;
 
-        let contentToCopy = inputField.value;
+        let contentToCopy = this.copyContents.get(inputField) ?? inputField.value;
 
         if (type !== 'default') {
             let contentType = this.shareLinkManager.linkChecker(contentToCopy);
@@ -2686,7 +4593,7 @@ class UiManager {
         const inputField = document.querySelector('#copyText');
         if (!inputField) return;
 
-        const shareLink = inputField.value;
+        const shareLink = this.copyContents.get(inputField) ?? inputField.value;
         if (!shareLink.trim()) {
             this.showToast('没有内容可导出', 'warning');
             return;
@@ -3023,6 +4930,13 @@ class UiManager {
         const totalCount = result.success.length + result.failed.length;
         const successCount = result.success.length;
         const failedCount = result.failed.length;
+        const maxDisplayedFiles = 100;
+        const visibleSuccessFiles = result.success.slice(0, maxDisplayedFiles);
+        const visibleFailedFiles = result.failed.slice(0, maxDisplayedFiles);
+        const escapeHtml = value => String(value ?? '').replace(/[&<>"']/g, char => ({
+            '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+        })[char]);
+        const fullPath = file => `${result.commonPath || ''}${file.path || file.fileName || ''}`;
 
         // 成功的列表是后加的，先借用失败的样式了
         const successListHtml = successCount > 0 ? `
@@ -3031,12 +4945,13 @@ class UiManager {
                 成功文件列表
             </div>
             <div class="fs-failed-list">
-                ${result.success.map(fileInfo => `
+                ${visibleSuccessFiles.map(fileInfo => `
                     <div class="fs-failed-item">
-                        <div class="fs-failed-name">${fileInfo.fileName}</div>
+                        <div class="fs-failed-name">${escapeHtml(fullPath(fileInfo))}</div>
                     </div>
                 `).join('')}
             </div>
+            ${successCount > visibleSuccessFiles.length ? `<div style="font-size: 12px; color: var(--text-secondary); margin-top: 8px;">只显示前 ${visibleSuccessFiles.length} 条，共 ${successCount} 条</div>` : ''}
         </div>
         ` : '';
 
@@ -3046,20 +4961,21 @@ class UiManager {
                 失败文件列表
             </div>
             <div class="fs-failed-list">
-                ${result.failed.map(fileInfo => `
+                ${visibleFailedFiles.map(fileInfo => `
                     <div class="fs-failed-item">
-                        <div class="fs-failed-name">${fileInfo.fileName}</div>
-                        ${fileInfo.error ? `<div class="fs-failed-error">${fileInfo.error}</div>` : ''}
+                        <div class="fs-failed-name">${escapeHtml(fullPath(fileInfo))}</div>
+                        <div class="fs-failed-error">${escapeHtml(fileInfo.error || '未返回错误原因')}</div>
                     </div>
                 `).join('')}
             </div>
+            ${failedCount > visibleFailedFiles.length ? `<div style="font-size: 12px; color: var(--text-secondary); margin-top: 8px;">只显示前 ${visibleFailedFiles.length} 条，共 ${failedCount} 条；可下载全部失败清单</div>` : ''}
         </div>
         ` : '';
 
         const modalOverlay = document.createElement('div');
         modalOverlay.className = 'fs-modal-overlay';
         modalOverlay.innerHTML = `
-        <div class="modal" style="max-width: 500px;">
+        <div class="modal fs-results-modal" style="max-width: 500px;">
             <div class="fs-modal-header">
                 <div class="fs-modal-title">
                     <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -3097,49 +5013,38 @@ class UiManager {
                     关闭
                 </button>
                 ${failedCount > 0 ? `
-                    <div class="dropdown">
-                        <button class="btn fs-btn-secondary fs-dropdown-toggle">
-                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                                <path d="M21.21 15.89A10 10 0 1 1 8 2.83"></path>
-                                <path d="M22 12A10 10 0 0 0 12 2v10z"></path>
-                            </svg>
-                            操作
-                        </button>
-                        <div class="fs-dropdown-menu">
-                            <div class="fs-dropdown-item" data-action="retry">
-                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                                    <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path>
-                                    <path d="M3 3v5h5"></path>
-                                </svg>
-                                重试失败
-                            </div>
-                            <div class="fs-dropdown-item" data-action="export">
-                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-                                    <polyline points="7 10 12 15 17 10"></polyline>
-                                    <line x1="12" y1="15" x2="12" y2="3"></line>
-                                </svg>
-                                导出失败链接
-                            </div>
-                        </div>
-                    </div>
+                    <button class="btn fs-btn-secondary" data-action="retry">重试失败</button>
+                    <button class="btn fs-btn-outline" data-action="export">下载失败清单</button>
                 ` : ''}
             </div>
         </div>
         `;
 
         if (failedCount > 0) {
-            const dropdownItems = modalOverlay.querySelectorAll('.fs-dropdown-item');
-            dropdownItems.forEach(item => {
+            const actionButtons = modalOverlay.querySelectorAll('[data-action]');
+            actionButtons.forEach(item => {
                 item.addEventListener('click', async () => {
                     const action = item.dataset.action;
-                    modalOverlay.remove();
-
                     if (action === 'retry') {
-                        this.addAndRunTask('retry', { fileList: result.failed });
+                        modalOverlay.remove();
+                        this.addAndRunTask('retry', { fileList: result.failed, commonPath: result.commonPath || '' });
                     } else if (action === 'export') {
-                        const shareLinkResult = this.shareLinkManager.buildShareLink(result.failed, result.commonPath || '', false);
-                        this.showCopyModal(shareLinkResult[2], shareLinkResult[3] || [], "导出失败链接");
+                        const files = result.failed.map(file => ({
+                            etag: file.etag, size: file.size, path: file.path,
+                            error: file.error || '未返回错误原因'
+                        }));
+                        const totalSize = files.reduce((total, file) => total + Number(file.size), 0);
+                        const manifest = {
+                            scriptVersion: this.shareLinkManager.scriptVersion,
+                            exportVersion: '1.0',
+                            usesBase62EtagsInExport: false,
+                            commonPath: result.commonPath || '',
+                            totalFilesCount: files.length,
+                            totalSize,
+                            formattedTotalSize: this.shareLinkManager._formatSize(totalSize),
+                            files
+                        };
+                        this.downloadJsonFile(JSON.stringify(manifest, null, 2), '123FastLink-失败清单.json');
                     }
                 });
             });
@@ -3357,20 +5262,22 @@ class UiManager {
      * 任务函数 - 启动从输入的内容解析并保存秒传链接，UI层面的保存入口，retry为是可以重试失败的文件
      * @param {*} content - 输入内容（秒传链接/JSON）
      */
-    async launchSaveLink(content, retry = false) {
+    async launchSaveLink(content, retry = false, commonPath = '') {
         const poll = this.startRollPolling("保存秒传链接");
         let saveResult;
         if (!retry) {
             saveResult = await this.shareLinkManager.saveShareLink(content);
         } else {
-            saveResult = await this.shareLinkManager.retrySaveFailed(content);
+            saveResult = await this.shareLinkManager.retrySaveFailed(content, commonPath);
         }
         // 清除任务取消标志
         this.shareLinkManager.taskCancel = false;
         this.stopRollPolling(poll);
         this.showSaveResultsModal(saveResult[2]);
         this.renewWebPageList();
-        this.showToast(saveResult[0] ? "保存成功" : "保存失败", saveResult[0] ? 'success' : 'error');
+        const failedCount = saveResult[2]?.failed?.length || 0;
+        const message = failedCount ? `保存完成，${failedCount} 个文件失败，可重试或下载详情` : (saveResult[0] ? '保存成功' : `保存失败：${saveResult[1] || '未知错误'}`);
+        this.showToast(message, saveResult[0] ? 'success' : 'error');
     }
 
     async launchSaveSecondaryLink(content) {
@@ -3548,7 +5455,7 @@ class UiManager {
 
         // 保存按钮事件绑定
         modalOverlay.querySelector('#saveButton').addEventListener('click', async () => {
-            const content = textarea.value.trim();
+            const content = await this.getInputContent(textarea, saveTask === 'save');
             if (!content) {
                 this.showToast("请输入秒传链接或导入JSON文件", 'warning');
                 return;
@@ -3560,7 +5467,7 @@ class UiManager {
         if (canOnlyLink) {
             // 仅保存链接按钮事件绑定
             modalOverlay.querySelector('#saveButtonOnlyLink').addEventListener('click', async () => {
-                const content = textarea.value.trim();
+                const content = await this.getInputContent(textarea);
                 if (!content) {
                     this.showToast("请输入秒传链接或导入JSON文件", 'warning');
                     return;
@@ -3585,6 +5492,11 @@ class UiManager {
 
     // 处理文件拖拽和读取
     setupFileDropAndInput(textarea, fileInput) {
+        const placeholder = textarea.placeholder;
+        textarea.addEventListener('input', () => {
+            this.importedFiles.delete(textarea);
+            textarea.placeholder = placeholder;
+        });
         // 拖拽事件
         textarea.addEventListener('dragover', (e) => {
             e.preventDefault();
@@ -3616,7 +5528,7 @@ class UiManager {
     }
 
     /**
-     * 读取文件并将内容填充到文本区域
+     * 保留文件引用，避免将大清单整体填入文本区域
      * @param {*} file - 要读取的文件
      * @param {*} textarea - 目标文本区域
      * @returns
@@ -3637,12 +5549,16 @@ class UiManager {
             return;
         }
 
-        const reader = new FileReader();
-        reader.onload = (e) => {
-            textarea.value = e.target.result;
-            this.showToast('文件导入成功 ✅', 'success');
-        };
-        reader.readAsText(file);
+        this.importedFiles.set(textarea, file);
+        textarea.value = '';
+        textarea.placeholder = '已选择：' + file.name + '（' + (file.size / (1024 * 1024)).toFixed(2) + ' MB）。点击保存处理全部文件；输入文字可取消文件选择。';
+        this.showToast('文件导入成功 ✅', 'success');
+    }
+
+    async getInputContent(textarea, asFile = false) {
+        const file = this.importedFiles.get(textarea);
+        if (!file) return textarea.value.trim();
+        return asFile ? file : (await file.text()).trim();
     }
 
     /**

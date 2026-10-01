@@ -8,6 +8,8 @@ import styles from "./styles.css";
 export class UiManager {
     constructor(shareLinkManager, selector, firstTime = false) {
         this.firstTime = firstTime;
+        this.importedFiles = new WeakMap();
+        this.copyContents = new WeakMap();
         this.shareLinkManager = shareLinkManager;
         this.selector = selector;
         this.isProgressMinimized = false;
@@ -71,7 +73,7 @@ export class UiManager {
         }, {
             key: "saveLinkDelay", label: "保存链接延时 (毫秒)", type: "number", value: GlobalConfig.saveLinkDelay
         }, { key: "mkdirDelay", label: "创建文件夹延时 (毫秒)", type: "number", value: GlobalConfig.mkdirDelay }, {
-            key: "maxTextFileSize",
+            key: "MAX_TEXT_FILE_SIZE",
             label: "文本文件最大大小 (字节)",
             type: "number",
             value: GlobalConfig.MAX_TEXT_FILE_SIZE
@@ -153,9 +155,9 @@ export class UiManager {
                 }, description: '保存秒传链接'
             }, 'retry': {
                 addTask: function (params = {}) {
-                    return { type: 'retry', params: { fileList: params.fileList } };
+                    return { type: 'retry', params: { fileList: params.fileList, commonPath: params.commonPath } };
                 }, handler: async function (task) {
-                    await this.launchSaveLink(task.params.fileList, true);
+                    await this.launchSaveLink(task.params.fileList, true, task.params.commonPath);
                 }, description: '重试保存失败的文件'
             }, 'saveOnlyLink': {
                 addTask: function (params = {}) {
@@ -531,10 +533,10 @@ export class UiManager {
         const fileListHtml = Array.isArray(this.shareLinkManager.fileInfoList) && allFilePath.length > 0 ? `
             <div class="fs-file-list-container">
                 <div class="fs-file-list-header">
-                    <div class="fs-file-count">文件列表（共${allFilePath.length}个）</div>
+                    <div class="fs-file-count">文件列表（共${allFilePath.length}个${allFilePath.length > 100 ? '，只显示前100个' : ''}）</div>
                 </div>
                 <div class="fs-file-list">
-                    ${allFilePath.map(f => `
+                    ${allFilePath.slice(0, 100).map(f => `
                         <div class="fs-file-item">${f}</div>
                     `).join('')}
                 </div>
@@ -562,7 +564,8 @@ export class UiManager {
             </div>
             <div class="fs-modal-content">
                 ${fileListHtml}
-                <textarea id="copyText" placeholder="请输入或粘贴秒传链接...">${defaultText}</textarea>
+                <textarea id="copyText" placeholder="请输入或粘贴秒传链接..."></textarea>
+                ${defaultText.length > 16 * 1024 ? '<div class="fs-file-count">内容较大，仅显示预览；复制和导出使用完整内容</div>' : ''}
             </div>
             <div class="fs-modal-footer">
                 <button class="btn fs-btn-primary" id="copyJsonButton">
@@ -592,6 +595,13 @@ export class UiManager {
             </div>
         </div>
     `;
+
+        const copyText = modalOverlay.querySelector('#copyText');
+        copyText.value = defaultText.slice(0, 16 * 1024);
+        if (defaultText.length > 16 * 1024) {
+            copyText.readOnly = true;
+            this.copyContents.set(copyText, defaultText);
+        }
 
         // 复制JSON按钮事件
         modalOverlay.querySelector('#copyJsonButton').addEventListener('click', (e) => {
@@ -634,7 +644,7 @@ export class UiManager {
         const inputField = document.querySelector('#copyText');
         if (!inputField) return;
 
-        let contentToCopy = inputField.value;
+        let contentToCopy = this.copyContents.get(inputField) ?? inputField.value;
 
         if (type !== 'default') {
             let contentType = this.shareLinkManager.linkChecker(contentToCopy);
@@ -670,7 +680,7 @@ export class UiManager {
         const inputField = document.querySelector('#copyText');
         if (!inputField) return;
 
-        const shareLink = inputField.value;
+        const shareLink = this.copyContents.get(inputField) ?? inputField.value;
         if (!shareLink.trim()) {
             this.showToast('没有内容可导出', 'warning');
             return;
@@ -1007,6 +1017,13 @@ export class UiManager {
         const totalCount = result.success.length + result.failed.length;
         const successCount = result.success.length;
         const failedCount = result.failed.length;
+        const maxDisplayedFiles = 100;
+        const visibleSuccessFiles = result.success.slice(0, maxDisplayedFiles);
+        const visibleFailedFiles = result.failed.slice(0, maxDisplayedFiles);
+        const escapeHtml = value => String(value ?? '').replace(/[&<>"']/g, char => ({
+            '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+        })[char]);
+        const fullPath = file => `${result.commonPath || ''}${file.path || file.fileName || ''}`;
 
         // 成功的列表是后加的，先借用失败的样式了
         const successListHtml = successCount > 0 ? `
@@ -1015,12 +1032,13 @@ export class UiManager {
                 成功文件列表
             </div>
             <div class="fs-failed-list">
-                ${result.success.map(fileInfo => `
+                ${visibleSuccessFiles.map(fileInfo => `
                     <div class="fs-failed-item">
-                        <div class="fs-failed-name">${fileInfo.fileName}</div>
+                        <div class="fs-failed-name">${escapeHtml(fullPath(fileInfo))}</div>
                     </div>
                 `).join('')}
             </div>
+            ${successCount > visibleSuccessFiles.length ? `<div style="font-size: 12px; color: var(--text-secondary); margin-top: 8px;">只显示前 ${visibleSuccessFiles.length} 条，共 ${successCount} 条</div>` : ''}
         </div>
         ` : '';
 
@@ -1030,20 +1048,21 @@ export class UiManager {
                 失败文件列表
             </div>
             <div class="fs-failed-list">
-                ${result.failed.map(fileInfo => `
+                ${visibleFailedFiles.map(fileInfo => `
                     <div class="fs-failed-item">
-                        <div class="fs-failed-name">${fileInfo.fileName}</div>
-                        ${fileInfo.error ? `<div class="fs-failed-error">${fileInfo.error}</div>` : ''}
+                        <div class="fs-failed-name">${escapeHtml(fullPath(fileInfo))}</div>
+                        <div class="fs-failed-error">${escapeHtml(fileInfo.error || '未返回错误原因')}</div>
                     </div>
                 `).join('')}
             </div>
+            ${failedCount > visibleFailedFiles.length ? `<div style="font-size: 12px; color: var(--text-secondary); margin-top: 8px;">只显示前 ${visibleFailedFiles.length} 条，共 ${failedCount} 条；可下载全部失败清单</div>` : ''}
         </div>
         ` : '';
 
         const modalOverlay = document.createElement('div');
         modalOverlay.className = 'fs-modal-overlay';
         modalOverlay.innerHTML = `
-        <div class="modal" style="max-width: 500px;">
+        <div class="modal fs-results-modal" style="max-width: 500px;">
             <div class="fs-modal-header">
                 <div class="fs-modal-title">
                     <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -1081,49 +1100,38 @@ export class UiManager {
                     关闭
                 </button>
                 ${failedCount > 0 ? `
-                    <div class="dropdown">
-                        <button class="btn fs-btn-secondary fs-dropdown-toggle">
-                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                                <path d="M21.21 15.89A10 10 0 1 1 8 2.83"></path>
-                                <path d="M22 12A10 10 0 0 0 12 2v10z"></path>
-                            </svg>
-                            操作
-                        </button>
-                        <div class="fs-dropdown-menu">
-                            <div class="fs-dropdown-item" data-action="retry">
-                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                                    <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path>
-                                    <path d="M3 3v5h5"></path>
-                                </svg>
-                                重试失败
-                            </div>
-                            <div class="fs-dropdown-item" data-action="export">
-                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-                                    <polyline points="7 10 12 15 17 10"></polyline>
-                                    <line x1="12" y1="15" x2="12" y2="3"></line>
-                                </svg>
-                                导出失败链接
-                            </div>
-                        </div>
-                    </div>
+                    <button class="btn fs-btn-secondary" data-action="retry">重试失败</button>
+                    <button class="btn fs-btn-outline" data-action="export">下载失败清单</button>
                 ` : ''}
             </div>
         </div>
         `;
 
         if (failedCount > 0) {
-            const dropdownItems = modalOverlay.querySelectorAll('.fs-dropdown-item');
-            dropdownItems.forEach(item => {
+            const actionButtons = modalOverlay.querySelectorAll('[data-action]');
+            actionButtons.forEach(item => {
                 item.addEventListener('click', async () => {
                     const action = item.dataset.action;
-                    modalOverlay.remove();
-
                     if (action === 'retry') {
-                        this.addAndRunTask('retry', { fileList: result.failed });
+                        modalOverlay.remove();
+                        this.addAndRunTask('retry', { fileList: result.failed, commonPath: result.commonPath || '' });
                     } else if (action === 'export') {
-                        const shareLinkResult = this.shareLinkManager.buildShareLink(result.failed, result.commonPath || '', false);
-                        this.showCopyModal(shareLinkResult[2], shareLinkResult[3] || [], "导出失败链接");
+                        const files = result.failed.map(file => ({
+                            etag: file.etag, size: file.size, path: file.path,
+                            error: file.error || '未返回错误原因'
+                        }));
+                        const totalSize = files.reduce((total, file) => total + Number(file.size), 0);
+                        const manifest = {
+                            scriptVersion: this.shareLinkManager.scriptVersion,
+                            exportVersion: '1.0',
+                            usesBase62EtagsInExport: false,
+                            commonPath: result.commonPath || '',
+                            totalFilesCount: files.length,
+                            totalSize,
+                            formattedTotalSize: this.shareLinkManager._formatSize(totalSize),
+                            files
+                        };
+                        this.downloadJsonFile(JSON.stringify(manifest, null, 2), '123FastLink-失败清单.json');
                     }
                 });
             });
@@ -1341,20 +1349,22 @@ export class UiManager {
      * 任务函数 - 启动从输入的内容解析并保存秒传链接，UI层面的保存入口，retry为是可以重试失败的文件
      * @param {*} content - 输入内容（秒传链接/JSON）
      */
-    async launchSaveLink(content, retry = false) {
+    async launchSaveLink(content, retry = false, commonPath = '') {
         const poll = this.startRollPolling("保存秒传链接");
         let saveResult;
         if (!retry) {
             saveResult = await this.shareLinkManager.saveShareLink(content);
         } else {
-            saveResult = await this.shareLinkManager.retrySaveFailed(content);
+            saveResult = await this.shareLinkManager.retrySaveFailed(content, commonPath);
         }
         // 清除任务取消标志
         this.shareLinkManager.taskCancel = false;
         this.stopRollPolling(poll);
         this.showSaveResultsModal(saveResult[2]);
         this.renewWebPageList();
-        this.showToast(saveResult[0] ? "保存成功" : "保存失败", saveResult[0] ? 'success' : 'error');
+        const failedCount = saveResult[2]?.failed?.length || 0;
+        const message = failedCount ? `保存完成，${failedCount} 个文件失败，可重试或下载详情` : (saveResult[0] ? '保存成功' : `保存失败：${saveResult[1] || '未知错误'}`);
+        this.showToast(message, saveResult[0] ? 'success' : 'error');
     }
 
     async launchSaveSecondaryLink(content) {
@@ -1532,7 +1542,7 @@ export class UiManager {
 
         // 保存按钮事件绑定
         modalOverlay.querySelector('#saveButton').addEventListener('click', async () => {
-            const content = textarea.value.trim();
+            const content = await this.getInputContent(textarea, saveTask === 'save');
             if (!content) {
                 this.showToast("请输入秒传链接或导入JSON文件", 'warning');
                 return;
@@ -1544,7 +1554,7 @@ export class UiManager {
         if (canOnlyLink) {
             // 仅保存链接按钮事件绑定
             modalOverlay.querySelector('#saveButtonOnlyLink').addEventListener('click', async () => {
-                const content = textarea.value.trim();
+                const content = await this.getInputContent(textarea);
                 if (!content) {
                     this.showToast("请输入秒传链接或导入JSON文件", 'warning');
                     return;
@@ -1569,6 +1579,11 @@ export class UiManager {
 
     // 处理文件拖拽和读取
     setupFileDropAndInput(textarea, fileInput) {
+        const placeholder = textarea.placeholder;
+        textarea.addEventListener('input', () => {
+            this.importedFiles.delete(textarea);
+            textarea.placeholder = placeholder;
+        });
         // 拖拽事件
         textarea.addEventListener('dragover', (e) => {
             e.preventDefault();
@@ -1600,7 +1615,7 @@ export class UiManager {
     }
 
     /**
-     * 读取文件并将内容填充到文本区域
+     * 保留文件引用，避免将大清单整体填入文本区域
      * @param {*} file - 要读取的文件
      * @param {*} textarea - 目标文本区域
      * @returns
@@ -1621,12 +1636,16 @@ export class UiManager {
             return;
         }
 
-        const reader = new FileReader();
-        reader.onload = (e) => {
-            textarea.value = e.target.result;
-            this.showToast('文件导入成功 ✅', 'success');
-        };
-        reader.readAsText(file);
+        this.importedFiles.set(textarea, file);
+        textarea.value = '';
+        textarea.placeholder = '已选择：' + file.name + '（' + (file.size / (1024 * 1024)).toFixed(2) + ' MB）。点击保存处理全部文件；输入文字可取消文件选择。';
+        this.showToast('文件导入成功 ✅', 'success');
+    }
+
+    async getInputContent(textarea, asFile = false) {
+        const file = this.importedFiles.get(textarea);
+        if (!file) return textarea.value.trim();
+        return asFile ? file : (await file.text()).trim();
     }
 
     /**

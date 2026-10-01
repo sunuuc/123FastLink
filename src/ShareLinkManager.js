@@ -1,5 +1,6 @@
 import { GlobalConfig } from "./config";
 import { createLogger } from "./logger";
+import { JSONParser } from "@streamparser/json";
 
 const log = createLogger('ShareLink');
 
@@ -329,6 +330,18 @@ export class ShareLinkManager {
     async parseShareLink(shareLink) {
         let result = null;
         try {
+            if (shareLink instanceof Blob) {
+                // 文件只保留引用。JSON 分块解析，不再同时持有整份文本和解析结果。
+                for (let offset = 0; offset < shareLink.size; offset += 64 * 1024) {
+                    const prefix = (await shareLink.slice(offset, offset + 64 * 1024).text()).trimStart();
+                    if (!prefix) continue;
+                    if (prefix[0] === '{' || prefix[0] === '[') {
+                        return this._parseJsonShareLink(await this._readJsonBlob(shareLink));
+                    }
+                    break;
+                }
+                shareLink = await shareLink.text();
+            }
             // 尝试作为JSON解析
             const jsonData = this.safeParse(shareLink);
             if (jsonData) {
@@ -338,23 +351,48 @@ export class ShareLinkManager {
                 result = await this._parseTextShareLink(shareLink, this.usesBase62EtagsInExport, false);
             }
         } catch (error) {
-            return [false, '保存失败: ' + error.message, result];
+            return [false, '保存失败: ' + error.message, [], [], ''];
         }
         return result;
     }
 
+    async _readJsonBlob(file) {
+        const parser = new JSONParser({ paths: ['$'], stringBufferSize: 64 * 1024 });
+        let jsonData;
+        parser.onValue = ({ value }) => { jsonData = value; };
+        for (let offset = 0; offset < file.size; offset += 64 * 1024) {
+            let chunk = new Uint8Array(await file.slice(offset, offset + 64 * 1024).arrayBuffer());
+            if (offset === 0 && chunk[0] === 0xef && chunk[1] === 0xbb && chunk[2] === 0xbf) {
+                chunk = chunk.subarray(3);
+            }
+            parser.write(chunk);
+            this.progress = Math.round(Math.min(offset + chunk.length, file.size) / file.size * 100);
+            this.progressDesc = '正在读取JSON清单... ' + this.progress + '%';
+            // 每块解析后让出主线程，让浏览器更新进度并回收临时缓冲区。
+            await new Promise(resolve => setTimeout(resolve, 0));
+        }
+        if (!parser.isEnded) parser.end();
+        return jsonData;
+    }
+
     /**
-     * 先创建文件夹，给shareFileList添加上parentFolderId，便于保存文件
+     * 根据清单路径创建文件夹，给shareFileList添加上parentFolderId，便于保存文件
      * @param {*} fileList - {etag: string, size: number, path: string, fileName: string}
      * @returns shareFileList - {etag: string, size: number, path: string, fileName: string, parentFolderId: number}
      */
     async _makeDirForFiles(shareFileList, commonPath) {
         const total = shareFileList.length;
-        // 文件夹创建，并为shareFileList添加parentFolderId------------------------------------
-        // 记录文件夹(path)
-        this.progressDesc = `正在创建文件夹...`;
+        this.progressDesc = '正在创建文件夹...';
         let folder = {};
-        // 如果存在commonPath，先创建文件夹
+        const createFolderId = async (parentId, name, path) => {
+            const newFolder = await this.apiClient.mkdir(parentId, name);
+            if (!newFolder.success || !newFolder.folderFileId) {
+                throw new Error(`创建目录失败：${path}`);
+            }
+            await new Promise(resolve => setTimeout(resolve, this.mkdirDelay));
+            return newFolder.folderFileId;
+        };
+        // 如果存在commonPath，先创建其目录
         const rootFolderId = await this.apiClient.getParentFileId();
         if (commonPath) {
             const commonPathParts = commonPath.split('/').filter(part => part !== '');
@@ -365,9 +403,7 @@ export class ShareLinkManager {
                 const folderName = commonPathParts[i];
 
                 if (!folder[currentPath]) {
-                    const newFolder = await this.apiClient.mkdir(currentParentId, folderName);
-                    await new Promise(resolve => setTimeout(resolve, this.mkdirDelay));
-                    folder[currentPath] = newFolder.folderFileId;
+                    folder[currentPath] = await createFolderId(currentParentId, folderName, currentPath);
                 }
 
                 currentParentId = folder[currentPath];
@@ -385,13 +421,9 @@ export class ShareLinkManager {
             for (let i = 0; i < itemPath.length; i++) {
                 const path = itemPath.slice(0, i + 1).join('/');
                 if (!folder[path]) {
-                    const newFolderID = await this.apiClient.mkdir(nowParentFolderId, itemPath[i]);
-                    await new Promise(resolve => setTimeout(resolve, this.mkdirDelay));
-                    folder[path] = newFolderID.folderFileId;
-                    nowParentFolderId = newFolderID.folderFileId;
-                } else {
-                    nowParentFolderId = folder[path];
+                    folder[path] = await createFolderId(nowParentFolderId, itemPath[i], path);
                 }
+                nowParentFolderId = folder[path];
 
                 // 任务取消
                 if (this.taskCancel) {
@@ -424,17 +456,30 @@ export class ShareLinkManager {
             // 任务取消
             if (this.taskCancel) {
                 this.progressDesc = "任务已取消";
+                failedList.push(...shareFileList.slice(i).map(fileInfo => ({
+                    ...fileInfo, error: '任务取消，尚未保存'
+                })));
                 break;
             }
 
             const fileInfo = shareFileList[i];
+            if (fileInfo.parentFolderId == null) {
+                failedList.push({ ...fileInfo, error: '目标目录ID缺失，尚未保存；请重新导入失败链接' });
+                failed++;
+                continue;
+            }
             if (i > 0) {
                 await new Promise(resolve => setTimeout(resolve, this.saveLinkDelay));
             }
 
-            const reuse = await this.apiClient.getFile({
-                etag: fileInfo.etag, size: fileInfo.size, fileName: fileInfo.fileName
-            }, fileInfo.parentFolderId);
+            let reuse;
+            try {
+                reuse = await this.apiClient.getFile({
+                    etag: fileInfo.etag, size: fileInfo.size, fileName: fileInfo.fileName
+                }, fileInfo.parentFolderId);
+            } catch (error) {
+                reuse = [false, '请求失败：' + error.message];
+            }
             if (reuse[0]) {
                 success++;
                 successList.push(fileInfo);
@@ -468,13 +513,22 @@ export class ShareLinkManager {
 
         const fileInfoList = await this.parseShareLink(content);
         if (!fileInfoList[0]) {
-            saveResult.failed.push(...fileInfoList[3]); // 添加解析失败的文件
+            saveResult.failed.push(...(fileInfoList[3] || [])); // 添加解析失败的文件
             return [false, '保存失败: ' + fileInfoList[1], saveResult];
         }
-        saveResult = await this._saveFileList(await this._makeDirForFiles(fileInfoList[2], fileInfoList[4]));
-        saveResult.failed.push(...fileInfoList[3]); // 添加解析失败的文件
+        try {
+            const files = await this._makeDirForFiles(fileInfoList[2], fileInfoList[4]);
+            if (this.taskCancel) {
+                saveResult.failed.push(...files.map(file => ({ ...file, error: '任务取消，尚未保存' })));
+            } else {
+                saveResult = await this._saveFileList(files);
+            }
+        } catch (error) {
+            saveResult.failed.push(...fileInfoList[2].map(file => ({ ...file, error: error.message })));
+        }
+        saveResult.failed.push(...(fileInfoList[3] || [])); // 添加解析失败的文件
         saveResult.commonPath = fileInfoList[4];
-        return [true, null, saveResult];
+        return [saveResult.failed.length === 0, null, saveResult];
     }
 
     async saveShareLinkOnlyText(shareLink, fileName) {
@@ -488,8 +542,10 @@ export class ShareLinkManager {
      * @returns
      */
     // // TODO commonPath 处理
-    async retrySaveFailed(FileList) {
-        return [true, null, await this._saveFileList(FileList)];
+    async retrySaveFailed(FileList, commonPath = '') {
+        const result = await this._saveFileList(FileList);
+        result.commonPath = commonPath;
+        return [result.failed.length === 0, null, result];
     }
 
     // ------------------二级秒传链接相关----------------------

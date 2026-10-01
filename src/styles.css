@@ -84,6 +84,10 @@
 .fs-task-remove:hover{background:var(--danger-color);color:white}
 .fs-task-remove:disabled{opacity:0.5;cursor:not-allowed}
 .fs-results-content{text-align:left}
+.fs-results-modal{display:flex;flex-direction:column}
+.fs-results-modal .fs-results-content{min-height:0;overflow-y:auto}
+.fs-results-modal .fs-modal-header,.fs-results-modal .fs-modal-footer{flex-shrink:0}
+.fs-results-modal .fs-modal-footer{flex-wrap:wrap}
 .fs-results-stats{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px}
 .fs-stat-card{padding:16px;border-radius:var(--radius);text-align:center}
 .fs-stat-card.success{background:rgba(16,185,129,0.1);border:1px solid rgba(16,185,129,0.2)}

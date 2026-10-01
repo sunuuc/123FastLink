@@ -16,5 +16,8 @@
     "raw-loader": "^4.0.2",
     "webpack": "^5.107.2",
     "webpack-cli": "^7.0.2"
+  },
+  "dependencies": {
+    "@streamparser/json": "0.0.26"
   }
 }

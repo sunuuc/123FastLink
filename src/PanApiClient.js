@@ -42,8 +42,8 @@ export class PanApiClient {
                 method, headers, body, credentials: 'include'
             });
             const data = await response.json();
-            if (data.code !== 0) {
-                throw new Error(data.message);
+            if (!response.ok || data.code !== 0) {
+                throw new Error(`HTTP ${response.status}，API code ${data.code}：${data.message || response.statusText || '未知错误'}`);
             }
             return data;
         } catch (e) {
@@ -120,13 +120,14 @@ export class PanApiClient {
             }
             if (!reuse) {
                 log.error('保存文件失败:', fileInfo.fileName, 'response:', response);
-                return [false, "未能实现秒传", null];
+                const status = response.data.UploadFileStatus;
+                return [false, `未能实现秒传：服务器返回 Reuse=false（code=${response.code}，message=${response.message}${status == null ? '' : `，UploadFileStatus=${status}`}）`, null];
             } else {
                 return [true, null, response['data']['Info']['FileId']];
             }
         } catch (error) {
             log.error('上传请求失败:', error);
-            return [false, '请求失败', null];
+            return [false, '请求失败：' + error.message, null];
         }
     }
 
