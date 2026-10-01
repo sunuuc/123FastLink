@@ -2,6 +2,8 @@
 
 这是一个用于123云盘的用户脚本，能够帮助用户生成秒传链接，从而实现快速上传和分享文件。
 
+> 当前维护版本：**v2026.10.1.1**。本分支包含大清单导入优化、失败详情与重试改进。保存 JSON 清单时，脚本会按清单路径创建目录，不查询或复用网盘中已经存在的目录。
+
 ## 📖 目录
 1. [功能介绍](#功能介绍)
 2. [安装指南](#安装指南)
@@ -78,12 +80,19 @@ Tampermonkey 是一个用户脚本管理器，123FastLink 需要它才能运行�
 
 ### 第二步：安装 123FastLink 脚本
 
-**方法一：从 GreasyFork 或 ScriptCat 安装（推荐）**
+**方法一：安装本仓库当前版本**
+
+- [123 网盘版](https://raw.githubusercontent.com/sunuuc/123FastLink/main/dist/123FastLink.v3.user.js)
+- [123 网盘、夸克和天翼版](https://raw.githubusercontent.com/sunuuc/123FastLink/main/dist/123FastLinkWithPlatform.v3.user.js)
+
+打开链接后，在 Tampermonkey 提示中确认安装。GreasyFork/ScriptCat 上的版本由各自发布页面维护，可能与本仓库版本不同。
+
+**方法二：从 GreasyFork 或 ScriptCat 安装**
 1. 访问 [123FastLink - GreasyFork](https://greasyfork.org/zh-CN/scripts/525210-123fastlink) 或 [123FastLink - ScriptCat](https://scriptcat.org/zh-CN/script-show-page/5041)
 2. 点击 **"安装此脚本"** 按钮
 3. 在 Tampermonkey 窗口中点击 **"安装"** 确认
 
-**方法二：手动安装**
+**方法三：手动安装**
 1. 在 Tampermonkey 中点击 **"创建新脚本"**
 2. 复制 `dist/123FastLink.v3.user.js`的全部内容
 3. 粘贴到脚本编辑器中
@@ -227,7 +236,18 @@ Tampermonkey 是一个用户脚本管理器，123FastLink 需要它才能运行�
 ### 文件夹处理
 
 - ✅ 支持多级文件夹
-- ✅ 自动保留文件夹结构
+- ✅ 按秒传清单中的相对路径创建多级文件夹，保留清单结构
+- ⚠️ 保存 JSON 清单时不检查、不复用网盘中已有目录；如果目标位置已有同名目录，网盘中会另外创建一份
+- ✅ 同一份清单里的相同目录路径在本次任务中只创建一次
+- ✅ 所有目录创建完成后才开始保存文件
+
+### 大型 JSON 清单与失败重试（v2026.10.1.1）
+
+- 通过“选择文件”导入大型 JSON 时，脚本分块读取并解析文件，不把整份清单填入文本框。
+- 目录阶段完成后才进入文件保存阶段。进度窗口会显示处理进度。
+- 结果窗口限制列表预览数量；完整结果仍用于导出和重试。
+- 失败结果保留文件路径和服务端/请求错误详情，可直接重试或下载失败清单。
+- 大清单仍受浏览器和设备可用内存限制；建议用文件选择导入，不要把整份 JSON 粘贴到文本框。
 
 ---
 
@@ -337,7 +357,7 @@ Tampermonkey 是一个用户脚本管理器，123FastLink 需要它才能运行�
 
 **反馈渠道：**
 1. 在 GreasyFork 的评论区反馈
-2. 访问项目 GitHub：[Bao-qing/123FastLink](https://github.com/Bao-qing/123FastLink)
+2. 访问此分支的 GitHub：[sunuuc/123FastLink](https://github.com/sunuuc/123FastLink)；上游项目：[Bao-qing/123FastLink](https://github.com/Bao-qing/123FastLink)
 3. 提交 Issue 或 Pull Request
 
 
@@ -502,7 +522,8 @@ npm run publish
 
 ## 联系方式
 
-**项目主页：** https://github.com/Bao-qing/123FastLink
+**此分支：** https://github.com/sunuuc/123FastLink  
+**上游项目：** https://github.com/Bao-qing/123FastLink
 
 **脚本源码：** https://greasyfork.org/zh-CN/scripts/525210-123fastlink
 
